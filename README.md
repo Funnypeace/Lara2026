@@ -1,15 +1,22 @@
-# 🧭 Vertretungsplan Schulbegleitung (Demo)
+# 🧭 Vertretungsplan Schulbegleitung (Prototyp)
 
 Web-Tool für die Vertretungskoordination in der Schulbegleitung –
-Demo mit **fiktiven Beispieldaten** aus der Region **Norderstedt / Kreis Segeberg**.
+**Prototyp** mit **fiktiven Beispieldaten** (fiktive Personen und Straßen, echte Orte)
+aus der Region **Norderstedt / Kreis Segeberg**.
+Gedacht als Vorlage für die IT: Für den Produktivbetrieb auf einen eigenen Server
+packen und mit echtem Login/Rechteverwaltung versehen (siehe Datenschutz unten).
 
 ## Was kann das Tool?
 
-- **Karte** (OpenStreetMap): zeigt alle Schulen der betreuten Kinder und die Wohnorte der Mitarbeiter. Farben = Status (grün: verfügbar, rot: krank, orange: im Einsatz), Symbol = Verkehrsmittel (🚗 Auto / 🚌 ÖPNV).
-- **Vertretungsfälle**: Kinder, deren Stammkraft ausgefallen ist. „Vertretung suchen" sortiert alle verfügbaren Mitarbeiter nach **Fahrzeit zur Schule**:
-  - 🚗 Autofahrer: echte Fahrzeit über den OSRM-Routendienst (kostenlos, OpenStreetMap-basiert)
-  - 🚌 ÖPNV: Schätzwert + Klick-Link, der die echte Verbindung in Google Maps öffnet
-- **Steckbriefe**: pro Kind mit Schule, Betreuungszeit, Diagnose, Hinweisen und Notfallkontakt – inkl. Button **„per WhatsApp senden"** (öffnet WhatsApp mit fertigem Text, passend zum bestehenden WhatsApp-Workflow).
+- **Karte** (OpenStreetMap): zeigt alle Schulen der betreuten Kinder und die Wohnorte der Mitarbeiter (straßengenau). Farben = Status (grün: verfügbar, rot: krank, orange: im Einsatz), Symbol = Verkehrsmittel (🚗 Auto / 🚌 ÖPNV).
+- **Stammkraft-Verknüpfung**: Jedes Kind ist mit seiner festen Begleitkraft verknüpft. Meldet die sich krank, entsteht **automatisch ein Vertretungsfall** für ihr Kind („Max Mustermann krank → Lenny braucht Vertretung").
+- **Vertretungsfälle**: „Vertretung suchen" sortiert alle passenden verfügbaren Mitarbeiter nach **Fahrzeit zur Schule**:
+  - 🚗 Autofahrer: echte Fahrzeit über den OSRM-Routendienst (**kostenlos**, OpenStreetMap-basiert, kein API-Key). Fällt der Dienst aus, rechnet die App **offline** mit Luftlinie weiter.
+  - 🚌 ÖPNV: Offline-Schätzwert + Klick-Link, der die echte Verbindung in Google Maps öffnet
+  - „✅ zuweisen" trägt die Vertretung ein: Fall geschlossen, Mitarbeiter „im Einsatz", Eintrag im Tagesbericht.
+- **Anforderungen an die Vertretung** pro Kind hinterlegbar: z. B. *nur männliche/weibliche Vertretung* (filtert die Suche), *keine fremde Vertretung gewünscht* (Fall wird angezeigt, aber ohne Suche) oder Freitext-Besonderheiten.
+- **📊 Tagesbericht**: automatisches Protokoll pro Tag – wer hat sich wann krankgemeldet, wer hat wo vertreten. Teilbar per WhatsApp.
+- **Steckbriefe**: pro Kind mit Schule, Betreuungszeit, Diagnose, Hinweisen, Anforderungen und Notfallkontakt – inkl. Button **„per WhatsApp senden"** (öffnet WhatsApp mit fertigem Text, passend zum bestehenden WhatsApp-Workflow).
 - **Statusverwaltung**: Mitarbeiter per Klick auf krank / verfügbar / im Einsatz setzen; Vertretungsbedarf für ein Kind melden. Änderungen werden im Browser gespeichert (localStorage).
 - **Zugangscode** (Demo): `lara2026`
 

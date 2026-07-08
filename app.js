@@ -1,12 +1,16 @@
 // =====================================================================
-// Vertretungsplan Schulbegleitung – App-Logik
-// Karte: Leaflet + OpenStreetMap · Auto-Routen: OSRM (öffentl. Demo-Server)
-// ÖPNV: Schätzung + Deep-Link zu Google Maps (travelmode=transit)
-// Statusänderungen werden in localStorage gespeichert (Demo).
+// Vertretungsplan Schulbegleitung – App-Logik (Prototyp)
+//
+// Karte: Leaflet (lokal) + OpenStreetMap-Kacheln
+// Auto-Routen: OSRM (OpenStreetMap-basiert, kostenlos, kein API-Key) –
+//   fällt der Dienst aus, rechnet die App OFFLINE mit Luftlinie weiter.
+// ÖPNV: Offline-Schätzung + Deep-Link zur echten Verbindungsauskunft.
+// Alle Änderungen (Status, Fälle, Protokoll) landen im localStorage –
+// im späteren Produktivbetrieb ersetzt die IT das durch Server + Login.
 // =====================================================================
 
 const DEMO_CODE = "lara2026";
-const STORAGE_KEY = "vertretungsplan-demo-v1";
+const STORAGE_KEY = "vertretungsplan-demo-v2";
 
 // ---------- Zustand (Beispieldaten + lokale Änderungen) ----------
 let state = ladeZustand();
@@ -15,7 +19,8 @@ function ladeZustand() {
   const basis = {
     mitarbeiterStatus: Object.fromEntries(MITARBEITER.map(m => [m.id, m.status])),
     vertretungBenoetigt: Object.fromEntries(KINDER.map(k => [k.id, k.vertretungBenoetigt])),
-    gruende: Object.fromEntries(KINDER.map(k => [k.id, k.grund]))
+    gruende: Object.fromEntries(KINDER.map(k => [k.id, k.grund])),
+    protokoll: [...BEISPIEL_PROTOKOLL]
   };
   try {
     const gespeichert = JSON.parse(localStorage.getItem(STORAGE_KEY));
@@ -23,7 +28,8 @@ function ladeZustand() {
       return {
         mitarbeiterStatus: { ...basis.mitarbeiterStatus, ...gespeichert.mitarbeiterStatus },
         vertretungBenoetigt: { ...basis.vertretungBenoetigt, ...gespeichert.vertretungBenoetigt },
-        gruende: { ...basis.gruende, ...gespeichert.gruende }
+        gruende: { ...basis.gruende, ...gespeichert.gruende },
+        protokoll: Array.isArray(gespeichert.protokoll) ? gespeichert.protokoll : basis.protokoll
       };
     }
   } catch (e) { /* defekter Speicher → Basisdaten */ }
@@ -36,8 +42,24 @@ function speichereZustand() {
 
 const statusVon = m => state.mitarbeiterStatus[m.id];
 const brauchtVertretung = k => state.vertretungBenoetigt[k.id];
+const kinderVon = m => KINDER.filter(k => k.stammkraft === m.id);
+const mitarbeiterMitId = id => MITARBEITER.find(m => m.id === id);
+const kindMitId = id => KINDER.find(k => k.id === id);
 
-// ---------- Login (nur Demo-Schutz, kein echter Zugriffsschutz!) ----------
+// ---------- Protokoll ----------
+function heuteISO() { return new Date().toISOString().slice(0, 10); }
+function jetztZeit() { return new Date().toTimeString().slice(0, 5); }
+function datumDE(iso) {
+  const [j, m, t] = iso.split("-");
+  return `${t}.${m}.${j}`;
+}
+
+function logEintrag(typ, text) {
+  state.protokoll.push({ datum: heuteISO(), zeit: jetztZeit(), typ, text });
+  speichereZustand();
+}
+
+// ---------- Login (nur Demo-Schutz – echter Login folgt durch die IT) ----------
 const loginOverlay = document.getElementById("login-overlay");
 const loginInput = document.getElementById("login-code");
 const loginBtn = document.getElementById("login-btn");
@@ -102,13 +124,14 @@ function zeichneMarker() {
   });
 
   MITARBEITER.forEach(m => {
+    const betreut = kinderVon(m).map(k => k.name).join(", ") || "–";
     L.marker([m.wohnort.lat, m.wohnort.lng], { icon: mitarbeiterIcon(m) })
-      .bindPopup(`<b>${m.name}</b><br>${modusText[m.verkehrsmittel]} · <span style="color:${statusFarben[statusVon(m)]}; font-weight:700;">${statusText[statusVon(m)]}</span><br>📍 ${m.wohnort.adresse}<br>${m.qualifikation}`)
+      .bindPopup(`<b>${m.name}</b><br>${modusText[m.verkehrsmittel]} · <span style="color:${statusFarben[statusVon(m)]}; font-weight:700;">${statusText[statusVon(m)]}</span><br>📍 ${m.wohnort.adresse}<br>🎒 Stammkind(er): ${betreut}<br>${m.qualifikation}`)
       .addTo(markerEbene);
   });
 }
 
-// ---------- Entfernungen ----------
+// ---------- Entfernungen (kostenlos: OSRM/OpenStreetMap + Offline-Fallback) ----------
 function luftlinieKm(a, b) {
   const R = 6371, rad = x => x * Math.PI / 180;
   const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
@@ -116,9 +139,10 @@ function luftlinieKm(a, b) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-// ÖPNV-Schätzung: Ø ~18 km/h Reisegeschwindigkeit + 12 Min. Fußweg/Wartezeit
+// Offline-Schätzungen (wenn kein Routendienst erreichbar ist):
+// ÖPNV: Ø ~18 km/h Reisegeschwindigkeit + 12 Min. Fußweg/Wartezeit
 function oepnvSchaetzungMin(km) { return Math.round(km / 18 * 60 + 12); }
-// Auto-Fallback (falls OSRM nicht erreichbar): Ø ~45 km/h über Land
+// Auto: Ø ~45 km/h über Land + 4 Min. Losfahren/Parken
 function autoSchaetzungMin(km) { return Math.round(km / 45 * 60 + 4); }
 
 // Fahrzeiten aller Auto-Mitarbeiter zur Schule in EINEM OSRM-Table-Request
@@ -165,12 +189,12 @@ async function zeigeRoute(m, kind) {
 // ---------- Links (Google Maps & WhatsApp) ----------
 function gmapsLink(m, kind) {
   const modus = m.verkehrsmittel === "auto" ? "driving" : "transit";
-  return `https://www.google.com/maps/dir/?api=1&origin=${m.wohnort.lat},${m.wohnort.lng}` +
+  return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(m.wohnort.adresse)}` +
          `&destination=${encodeURIComponent(kind.schule.adresse)}&travelmode=${modus}`;
 }
 
 function steckbriefText(k) {
-  return [
+  const zeilen = [
     `📋 *Steckbrief ${k.name}* (${k.alter} J., Klasse ${k.klasse})`,
     ``,
     `🏫 *Schule:* ${k.schule.name}`,
@@ -180,10 +204,11 @@ function steckbriefText(k) {
     `🩺 *Diagnose:* ${k.diagnose}`,
     ``,
     `⚠️ *Wichtig zu beachten:*`,
-    k.hinweise,
-    ``,
-    `📞 *Notfallkontakt:* ${k.notfallkontakt}`
-  ].join("\n");
+    k.hinweise
+  ];
+  if (anforderungsText(k)) zeilen.push(``, `👥 *Anforderung an die Vertretung:* ${anforderungsText(k)}`);
+  zeilen.push(``, `📞 *Notfallkontakt:* ${k.notfallkontakt}`);
+  return zeilen.join("\n");
 }
 
 function whatsappSteckbriefLink(k) {
@@ -192,7 +217,7 @@ function whatsappSteckbriefLink(k) {
 
 function whatsappAnfrageLink(m, kind, dauerText) {
   const text = [
-    `Hallo ${m.name.split(" ")[0]}, kannst du morgen die Vertretung für *${kind.name}* übernehmen?`,
+    `Hallo ${m.name.split(" ")[0]}, kannst du die Vertretung für *${kind.name}* übernehmen?`,
     ``,
     `🏫 ${kind.schule.name}, ${kind.schule.adresse}`,
     `🕐 ${kind.betreuungszeit}`,
@@ -201,6 +226,32 @@ function whatsappAnfrageLink(m, kind, dauerText) {
     `Den Steckbrief schicke ich dir bei Zusage. Gib mir bitte kurz Bescheid! 🙏`
   ].join("\n");
   return `https://wa.me/?text=${encodeURIComponent(text)}`;
+}
+
+// ---------- Anforderungen an die Vertretung ----------
+function anforderungsText(k) {
+  const a = k.anforderungen || {};
+  const teile = [];
+  if (a.keineVertretung) teile.push("Keine fremde Vertretung gewünscht!");
+  if (a.geschlecht === "m") teile.push("Nur männliche Vertretung.");
+  if (a.geschlecht === "w") teile.push("Nur weibliche Vertretung.");
+  if (a.hinweis) teile.push(a.hinweis);
+  return teile.join(" ");
+}
+
+function anforderungsBadges(k) {
+  const a = k.anforderungen || {};
+  let html = "";
+  if (a.keineVertretung) html += `<span class="pill pill-krank">🚫 keine Vertretung gewünscht</span>`;
+  if (a.geschlecht === "m") html += `<span class="pill pill-anforderung">👨 nur männlich</span>`;
+  if (a.geschlecht === "w") html += `<span class="pill pill-anforderung">👩 nur weiblich</span>`;
+  return html;
+}
+
+function erfuelltAnforderungen(m, k) {
+  const a = k.anforderungen || {};
+  if (a.geschlecht && m.geschlecht !== a.geschlecht) return false;
+  return true;
 }
 
 // ---------- UI: Kopfzeile ----------
@@ -230,34 +281,43 @@ function zeichneFaelle() {
   const faelle = KINDER.filter(brauchtVertretung);
   if (!faelle.length) {
     container.innerHTML = `<div class="card"><h3>✅ Keine offenen Fälle</h3>
-      <div class="meta">Aktuell benötigt kein Kind eine Vertretung. Bedarf kann im Tab „Kinder" gemeldet werden.</div></div>`;
+      <div class="meta">Aktuell benötigt kein Kind eine Vertretung. Meldet sich ein Mitarbeiter krank (Tab „Mitarbeiter"), entsteht hier automatisch ein Fall für sein Stammkind.</div></div>`;
     return;
   }
   container.innerHTML = faelle.map(k => {
-    const stamm = MITARBEITER.find(m => m.id === k.stammkraft);
+    const stamm = mitarbeiterMitId(k.stammkraft);
+    const keine = k.anforderungen?.keineVertretung;
     return `<div class="card fall-alarm">
-      <h3>🚨 ${k.name} <span class="meta">· ${k.klasse}</span></h3>
+      <h3>🚨 ${k.name} <span class="meta">· ${k.klasse}</span> ${anforderungsBadges(k)}</h3>
       <div class="meta">🏫 ${k.schule.name}<br>🕐 ${k.betreuungszeit}<br>👤 Stammkraft: ${stamm ? stamm.name : "–"}</div>
       <div class="grund">${state.gruende[k.id] || "Vertretung benötigt"}</div>
+      ${keine ? `<div class="anforderung-warnung">🚫 ${k.anforderungen.hinweis || "Es wird keine fremde Vertretung gewünscht."}</div>` : ""}
       <div class="card-actions">
-        <button class="aktion aktion-primaer" onclick="sucheVertretung('${k.id}')">🔍 Vertretung suchen</button>
-        <button class="aktion aktion-sekundaer" onclick="oeffneSteckbrief('${k.id}')">📋 Steckbrief</button>
-        <button class="aktion aktion-sekundaer" onclick="fallSchliessen('${k.id}')">✅ erledigt</button>
+        ${keine
+          ? `<button class="aktion aktion-sekundaer" onclick="oeffneSteckbrief('${k.id}')">📋 Steckbrief</button>
+             <button class="aktion aktion-sekundaer" onclick="fallSchliessen('${k.id}', true)">✅ Eltern informiert / erledigt</button>`
+          : `<button class="aktion aktion-primaer" onclick="sucheVertretung('${k.id}')">🔍 Vertretung suchen</button>
+             <button class="aktion aktion-sekundaer" onclick="oeffneSteckbrief('${k.id}')">📋 Steckbrief</button>
+             <button class="aktion aktion-sekundaer" onclick="fallSchliessen('${k.id}', false)">✅ erledigt</button>`}
       </div>
     </div>`;
   }).join("");
 }
 
-window.fallSchliessen = function (kindId) {
+window.fallSchliessen = function (kindId, ohneVertretung) {
+  const k = kindMitId(kindId);
   state.vertretungBenoetigt[kindId] = false;
   state.gruende[kindId] = "";
+  logEintrag("info", ohneVertretung
+    ? `ℹ️ Fall ${k.name} ohne Vertretung geschlossen (keine Vertretung gewünscht / anders gelöst)`
+    : `ℹ️ Fall ${k.name} geschlossen`);
   speichereZustand();
   allesNeuZeichnen();
 };
 
 // ---------- UI: Ranking ----------
 window.sucheVertretung = async function (kindId) {
-  const kind = KINDER.find(k => k.id === kindId);
+  const kind = kindMitId(kindId);
   document.getElementById("faelle-liste").classList.add("hidden");
   const panel = document.getElementById("ranking-panel");
   panel.classList.remove("hidden");
@@ -265,18 +325,29 @@ window.sucheVertretung = async function (kindId) {
 
   map.setView([kind.schule.lat, kind.schule.lng], 12);
 
-  const verfuegbare = MITARBEITER.filter(m => statusVon(m) === "verfuegbar");
-  if (!verfuegbare.length) {
-    inhalt.innerHTML = `<div class="ranking-kopf">Für <b>${kind.name}</b> (${kind.schule.name}) ist aktuell <b>niemand verfügbar</b>. Status im Tab „Mitarbeiter" prüfen.</div>`;
+  const anfHinweis = anforderungsText(kind)
+    ? `<div class="anforderung-warnung">👥 Anforderung: ${anforderungsText(kind)}</div>` : "";
+
+  const alleVerfuegbaren = MITARBEITER.filter(m => statusVon(m) === "verfuegbar");
+  const passende = alleVerfuegbaren.filter(m => erfuelltAnforderungen(m, kind));
+  const aussortiert = alleVerfuegbaren.length - passende.length;
+
+  if (!passende.length) {
+    inhalt.innerHTML = `<div class="ranking-kopf">Vertretung für <b>${kind.name}</b><br>🏫 ${kind.schule.name}</div>
+      ${anfHinweis}
+      <div class="card"><h3>😕 Niemand passt</h3><div class="meta">
+      ${alleVerfuegbaren.length ? `${alleVerfuegbaren.length} Mitarbeiter wären verfügbar, erfüllen aber die Anforderungen nicht.` : "Aktuell ist niemand verfügbar."}
+      Status im Tab „Mitarbeiter" prüfen.</div></div>`;
     return;
   }
 
   inhalt.innerHTML = `
     <div class="ranking-kopf">Vertretung für <b>${kind.name}</b><br>🏫 ${kind.schule.name}<br>🕐 ${kind.betreuungszeit}</div>
-    <p class="laden">⏳ Berechne Fahrzeiten (${verfuegbare.length} verfügbare Mitarbeiter)…</p>`;
+    ${anfHinweis}
+    <p class="laden">⏳ Berechne Fahrzeiten (${passende.length} passende Mitarbeiter)…</p>`;
 
-  // Fahrzeiten ermitteln
-  const autos = verfuegbare.filter(m => m.verkehrsmittel === "auto");
+  // Fahrzeiten ermitteln (OSRM = kostenlos/OpenStreetMap; sonst Offline-Schätzung)
+  const autos = passende.filter(m => m.verkehrsmittel === "auto");
   let osrm = {};
   let osrmFehler = false;
   if (autos.length) {
@@ -284,7 +355,7 @@ window.sucheVertretung = async function (kindId) {
     catch (e) { osrmFehler = true; }
   }
 
-  const eintraege = verfuegbare.map(m => {
+  const eintraege = passende.map(m => {
     const km = luftlinieKm(m.wohnort, kind.schule);
     let minuten, kmAnzeige, echt;
     if (m.verkehrsmittel === "auto" && osrm[m.id]) {
@@ -301,8 +372,10 @@ window.sucheVertretung = async function (kindId) {
 
   inhalt.innerHTML = `
     <div class="ranking-kopf">Vertretung für <b>${kind.name}</b><br>🏫 ${kind.schule.name}<br>🕐 ${kind.betreuungszeit}
-      ${osrmFehler ? '<br><small>⚠️ Routendienst nicht erreichbar – Auto-Zeiten sind geschätzt.</small>' : ""}
+      ${aussortiert ? `<br><small>👥 ${aussortiert} verfügbare(r) Mitarbeiter erfüllt/erfüllen die Anforderungen nicht und werden nicht angezeigt.</small>` : ""}
+      ${osrmFehler ? '<br><small>⚠️ Routendienst offline – Auto-Zeiten sind Offline-Schätzungen (Luftlinie).</small>' : ""}
     </div>
+    ${anfHinweis}
     ${eintraege.map((e, i) => {
       const dauerText = `${e.minuten} Min.${e.echt ? "" : " (geschätzt)"}`;
       return `<div class="card klickbar" onclick="zeigeRouteKlick('${e.m.id}','${kind.id}')">
@@ -313,26 +386,38 @@ window.sucheVertretung = async function (kindId) {
           🎓 ${e.m.qualifikation}</div>
         <div class="card-actions" onclick="event.stopPropagation()">
           <a class="aktion aktion-whatsapp" target="_blank" rel="noopener"
-             href="${whatsappAnfrageLink(e.m, kind, dauerText)}">💬 per WhatsApp anfragen</a>
+             href="${whatsappAnfrageLink(e.m, kind, dauerText)}">💬 anfragen</a>
+          <button class="aktion aktion-primaer" onclick="vertretungZuweisen('${e.m.id}','${kind.id}')">✅ zuweisen</button>
           <a class="aktion aktion-sekundaer" target="_blank" rel="noopener"
-             href="${gmapsLink(e.m, kind)}">🗺️ ${e.m.verkehrsmittel === "auto" ? "Route" : "ÖPNV-Verbindung"} öffnen</a>
+             href="${gmapsLink(e.m, kind)}">🗺️ ${e.m.verkehrsmittel === "auto" ? "Route" : "ÖPNV-Verbindung"}</a>
         </div>
       </div>`;
     }).join("")}
-    <p class="tab-hint">Tipp: Karte zeigt die Anfahrt, wenn du einen Eintrag antippst. ÖPNV-Zeiten sind Schätzwerte – der Verbindungs-Link öffnet die echte Fahrplanauskunft.</p>`;
+    <p class="tab-hint">Antippen zeigt die Anfahrt auf der Karte. „Zuweisen" schließt den Fall, setzt den Mitarbeiter auf „im Einsatz" und schreibt den Tagesbericht. ÖPNV-Zeiten sind Schätzwerte – der Verbindungs-Link öffnet die echte Fahrplanauskunft.</p>`;
+};
+
+window.vertretungZuweisen = function (mId, kId) {
+  const m = mitarbeiterMitId(mId);
+  const k = kindMitId(kId);
+  if (!confirm(`${m.name} als Vertretung für ${k.name} (${k.schule.name}) eintragen?`)) return;
+  state.mitarbeiterStatus[mId] = "im_einsatz";
+  state.vertretungBenoetigt[kId] = false;
+  state.gruende[kId] = "";
+  logEintrag("vertretung", `✅ ${m.name} übernimmt die Vertretung für ${k.name} (${k.schule.name})`);
+  rankingSchliessen();
+  allesNeuZeichnen();
 };
 
 window.zeigeRouteKlick = function (mId, kId) {
-  const m = MITARBEITER.find(x => x.id === mId);
-  const k = KINDER.find(x => x.id === kId);
-  zeigeRoute(m, k);
+  zeigeRoute(mitarbeiterMitId(mId), kindMitId(kId));
 };
 
-document.getElementById("ranking-back").addEventListener("click", () => {
+function rankingSchliessen() {
   document.getElementById("ranking-panel").classList.add("hidden");
   document.getElementById("faelle-liste").classList.remove("hidden");
   routenEbene.clearLayers();
-});
+}
+document.getElementById("ranking-back").addEventListener("click", rankingSchliessen);
 
 // ---------- UI: Mitarbeiter ----------
 const statusReihenfolge = ["verfuegbar", "krank", "im_einsatz"];
@@ -342,21 +427,53 @@ function zeichneMitarbeiter() {
   const sortiert = [...MITARBEITER].sort((a, b) =>
     statusReihenfolge.indexOf(statusVon(a)) - statusReihenfolge.indexOf(statusVon(b)) ||
     a.name.localeCompare(b.name));
-  container.innerHTML = sortiert.map(m => `
-    <div class="card">
+  container.innerHTML = sortiert.map(m => {
+    const betreut = kinderVon(m);
+    return `<div class="card">
       <h3>${m.name}
         <span class="pill pill-${statusVon(m)} pill-klick" title="Status ändern"
               onclick="statusWechseln('${m.id}')">${statusText[statusVon(m)]}</span>
         <span class="pill pill-modus">${modusText[m.verkehrsmittel]}</span>
       </h3>
-      <div class="meta">📍 ${m.wohnort.adresse} · 📞 ${m.telefon}<br>🎓 ${m.qualifikation}</div>
-    </div>`).join("");
+      <div class="meta">📍 ${m.wohnort.adresse} · 📞 ${m.telefon}<br>
+        🎒 Stammkind(er): ${betreut.length ? betreut.map(k => `${k.name} (${k.schule.name})`).join(", ") : "– (Springer)"}<br>
+        🎓 ${m.qualifikation}</div>
+    </div>`;
+  }).join("");
 }
 
+// Statuswechsel: Krankmeldung erzeugt AUTOMATISCH einen Vertretungsfall
+// für die Stammkinder des Mitarbeiters und schreibt das Protokoll.
 window.statusWechseln = function (mId) {
-  const aktuell = state.mitarbeiterStatus[mId];
-  const naechster = statusReihenfolge[(statusReihenfolge.indexOf(aktuell) + 1) % statusReihenfolge.length];
-  state.mitarbeiterStatus[mId] = naechster;
+  const m = mitarbeiterMitId(mId);
+  const alt = state.mitarbeiterStatus[mId];
+  const neu = statusReihenfolge[(statusReihenfolge.indexOf(alt) + 1) % statusReihenfolge.length];
+  state.mitarbeiterStatus[mId] = neu;
+
+  if (neu === "krank") {
+    const betroffene = kinderVon(m);
+    betroffene.forEach(k => {
+      if (!brauchtVertretung(k)) {
+        state.vertretungBenoetigt[k.id] = true;
+        state.gruende[k.id] = `Stammkraft ${m.name} krankgemeldet`;
+      }
+    });
+    const zusatz = betroffene.length
+      ? ` → ${betroffene.map(k => k.name).join(", ")} braucht Vertretung` +
+        (betroffene.some(k => k.anforderungen?.keineVertretung) ? " (Achtung: keine Vertretung gewünscht!)" : "") +
+        (betroffene.some(k => k.anforderungen?.geschlecht) ? " (Anforderung ans Geschlecht beachten!)" : "")
+      : "";
+    logEintrag("krankmeldung", `🤒 ${m.name} hat sich krankgemeldet${zusatz}`);
+    if (betroffene.length) {
+      allesNeuZeichnen();
+      document.querySelector('.tab[data-tab="faelle"]').click();
+      return;
+    }
+  } else if (alt === "krank" && neu === "verfuegbar") {
+    logEintrag("info", `💪 ${m.name} wieder gesund/verfügbar`);
+  } else if (alt === "im_einsatz" && neu === "verfuegbar") {
+    logEintrag("info", `ℹ️ Einsatz beendet – ${m.name} wieder verfügbar`);
+  }
   speichereZustand();
   allesNeuZeichnen();
 };
@@ -365,16 +482,17 @@ window.statusWechseln = function (mId) {
 function zeichneKinder() {
   const container = document.getElementById("kinder-liste");
   container.innerHTML = KINDER.map(k => {
-    const stamm = MITARBEITER.find(m => m.id === k.stammkraft);
+    const stamm = mitarbeiterMitId(k.stammkraft);
     const offen = brauchtVertretung(k);
     return `<div class="card ${offen ? "fall-alarm" : ""}">
       <h3>${k.name} <span class="meta">· ${k.alter} J. · ${k.klasse}</span>
-        ${offen ? '<span class="pill pill-krank">Vertretung offen</span>' : ""}</h3>
-      <div class="meta">🏫 ${k.schule.name}<br>👤 Stammkraft: ${stamm ? stamm.name : "–"}</div>
+        ${offen ? '<span class="pill pill-krank">Vertretung offen</span>' : ""}
+        ${anforderungsBadges(k)}</h3>
+      <div class="meta">🏫 ${k.schule.name}<br>👤 Stammkraft: ${stamm ? `${stamm.name} (${statusText[statusVon(stamm)]})` : "–"}</div>
       <div class="card-actions">
         <button class="aktion aktion-primaer" onclick="oeffneSteckbrief('${k.id}')">📋 Steckbrief</button>
         ${offen
-          ? `<button class="aktion aktion-sekundaer" onclick="fallSchliessen('${k.id}')">✅ Fall schließen</button>`
+          ? `<button class="aktion aktion-sekundaer" onclick="fallSchliessen('${k.id}', false)">✅ Fall schließen</button>`
           : `<button class="aktion aktion-rot" onclick="bedarfMelden('${k.id}')">🚨 Vertretung melden</button>`}
       </div>
     </div>`;
@@ -382,22 +500,62 @@ function zeichneKinder() {
 }
 
 window.bedarfMelden = function (kindId) {
+  const k = kindMitId(kindId);
   const grund = prompt("Grund für den Vertretungsbedarf (z. B. „Stammkraft krankgemeldet“):", "Stammkraft krankgemeldet");
   if (grund === null) return;
   state.vertretungBenoetigt[kindId] = true;
   state.gruende[kindId] = grund || "Vertretung benötigt";
-  speichereZustand();
+  logEintrag("krankmeldung", `🚨 Vertretungsbedarf gemeldet für ${k.name}: ${grund || "ohne Angabe"}`);
   allesNeuZeichnen();
   document.querySelector('.tab[data-tab="faelle"]').click();
 };
+
+// ---------- UI: Tagesbericht ----------
+function berichtText(datum, eintraege) {
+  return [
+    `📊 *Tagesbericht Vertretung ${datumDE(datum)}*`,
+    ``,
+    ...eintraege.map(e => `${e.zeit} Uhr – ${e.text}`)
+  ].join("\n");
+}
+
+function zeichneBericht() {
+  const container = document.getElementById("bericht-liste");
+  const nachDatum = {};
+  state.protokoll.forEach(e => (nachDatum[e.datum] = nachDatum[e.datum] || []).push(e));
+  const daten = Object.keys(nachDatum).sort().reverse();
+
+  if (!daten.length) {
+    container.innerHTML = `<div class="card"><div class="meta">Noch keine Einträge. Krankmeldungen und Zuweisungen landen automatisch hier.</div></div>`;
+    return;
+  }
+
+  container.innerHTML = daten.map(datum => {
+    const eintraege = [...nachDatum[datum]].sort((a, b) => a.zeit.localeCompare(b.zeit));
+    const krank = eintraege.filter(e => e.typ === "krankmeldung").length;
+    const vertreten = eintraege.filter(e => e.typ === "vertretung").length;
+    return `<div class="card">
+      <h3>📅 ${datumDE(datum)} ${datum === heuteISO() ? '<span class="pill pill-modus">heute</span>' : ""}</h3>
+      <div class="meta">🤒 ${krank} Krankmeldung(en) · ✅ ${vertreten} Vertretung(en) zugewiesen</div>
+      <ul class="bericht-eintraege">
+        ${eintraege.map(e => `<li><span class="bericht-zeit">${e.zeit}</span> ${e.text}</li>`).join("")}
+      </ul>
+      <div class="card-actions">
+        <a class="aktion aktion-whatsapp" target="_blank" rel="noopener"
+           href="https://wa.me/?text=${encodeURIComponent(berichtText(datum, eintraege))}">💬 Bericht per WhatsApp teilen</a>
+      </div>
+    </div>`;
+  }).join("");
+}
 
 // ---------- UI: Steckbrief-Modal ----------
 const modalOverlay = document.getElementById("modal-overlay");
 const modal = document.getElementById("modal");
 
 window.oeffneSteckbrief = function (kindId) {
-  const k = KINDER.find(x => x.id === kindId);
-  const stamm = MITARBEITER.find(m => m.id === k.stammkraft);
+  const k = kindMitId(kindId);
+  const stamm = mitarbeiterMitId(k.stammkraft);
+  const anf = anforderungsText(k);
   modal.innerHTML = `
     <h2>📋 Steckbrief: ${k.name}</h2>
     <div class="untertitel">${k.alter} Jahre · Klasse ${k.klasse}</div>
@@ -406,8 +564,10 @@ window.oeffneSteckbrief = function (kindId) {
     <div class="steckbrief-feld"><label>Diagnose</label><div>${k.diagnose}</div></div>
     <div class="steckbrief-feld"><label>Wichtig zu beachten</label>
       <div class="steckbrief-wichtig">⚠️ ${k.hinweise}</div></div>
+    ${anf ? `<div class="steckbrief-feld"><label>Anforderungen an die Vertretung</label>
+      <div class="steckbrief-wichtig">👥 ${anf}</div></div>` : ""}
     <div class="steckbrief-feld"><label>Notfallkontakt</label><div>${k.notfallkontakt}</div></div>
-    <div class="steckbrief-feld"><label>Stammkraft</label><div>${stamm ? `${stamm.name} (${stamm.telefon})` : "–"}</div></div>
+    <div class="steckbrief-feld"><label>Stammkraft</label><div>${stamm ? `${stamm.name} (${stamm.telefon}) – aktuell ${statusText[statusVon(stamm)]}` : "–"}</div></div>
     <div class="modal-actions">
       <a class="aktion aktion-whatsapp" target="_blank" rel="noopener"
          href="${whatsappSteckbriefLink(k)}">💬 Steckbrief per WhatsApp senden</a>
@@ -426,6 +586,7 @@ function allesNeuZeichnen() {
   zeichneFaelle();
   zeichneMitarbeiter();
   zeichneKinder();
+  zeichneBericht();
   zeichneMarker();
 }
 allesNeuZeichnen();
