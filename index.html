@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vertretungsplan Schulbegleitung – Kreis Segeberg</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧭</text></svg>">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Einfache Zugangssperre (nur Demo-Schutz!) -->
+  <div id="login-overlay">
+    <div class="login-box">
+      <h1>🧭 Vertretungsplan<br>Schulbegleitung</h1>
+      <p>Demo · Kreis Segeberg / Norderstedt</p>
+      <input type="password" id="login-code" placeholder="Zugangscode" autocomplete="off">
+      <button id="login-btn">Anmelden</button>
+      <p class="login-hint">Demo-Code: <code>lara2026</code></p>
+    </div>
+  </div>
+
+  <header>
+    <div class="header-title">
+      <span class="logo">🧭</span>
+      <div>
+        <h1>Vertretungsplan Schulbegleitung</h1>
+        <small>Demo mit Beispieldaten · Kreis Segeberg &amp; Norderstedt</small>
+      </div>
+    </div>
+    <div class="header-stats" id="header-stats"></div>
+  </header>
+
+  <main>
+    <aside id="sidebar">
+      <nav class="tabs">
+        <button class="tab active" data-tab="faelle">🚨 Vertretungsfälle</button>
+        <button class="tab" data-tab="mitarbeiter">👥 Mitarbeiter</button>
+        <button class="tab" data-tab="kinder">🎒 Kinder</button>
+      </nav>
+
+      <section id="tab-faelle" class="tab-content active">
+        <div id="faelle-liste"></div>
+        <div id="ranking-panel" class="hidden">
+          <button class="back-btn" id="ranking-back">← zurück zu den Fällen</button>
+          <div id="ranking-inhalt"></div>
+        </div>
+      </section>
+
+      <section id="tab-mitarbeiter" class="tab-content">
+        <p class="tab-hint">Status antippen zum Ändern (wird lokal gespeichert):<br>
+          <span class="pill pill-verfuegbar">verfügbar</span> →
+          <span class="pill pill-krank">krank</span> →
+          <span class="pill pill-im_einsatz">im Einsatz</span></p>
+        <div id="mitarbeiter-liste"></div>
+      </section>
+
+      <section id="tab-kinder" class="tab-content">
+        <p class="tab-hint">Steckbrief öffnen oder Vertretungsbedarf melden.</p>
+        <div id="kinder-liste"></div>
+      </section>
+    </aside>
+
+    <div id="map"></div>
+  </main>
+
+  <!-- Steckbrief-Modal -->
+  <div id="modal-overlay" class="hidden">
+    <div id="modal" role="dialog" aria-modal="true"></div>
+  </div>
+
+  <footer>
+    ⚠️ Demo mit fiktiven Beispieldaten · Karte © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> · Auto-Routen: OSRM · Für echte Personendaten: Datenschutz (DSGVO, Gesundheitsdaten!) vorher klären.
+  </footer>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
