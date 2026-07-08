@@ -126,8 +126,23 @@ a.aktion {
 .pill-verfuegbar { background: #d9f2e4; color: #16663d; }
 .pill-krank { background: #fdecea; color: var(--rot); }
 .pill-im_einsatz { background: #fef3c7; color: #92400e; }
-.pill-klick { cursor: pointer; user-select: none; }
 .pill-modus { background: #e0ecfb; color: var(--blau-dunkel); }
+
+/* ---------- Status-Dropdown (Mitarbeiter) ---------- */
+.status-zeile { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.status-label {
+  font-size: .72rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--grau);
+}
+.status-select {
+  border: none; border-radius: 999px; padding: 5px 26px 5px 12px; font-size: .8rem;
+  font-weight: 700; cursor: pointer; appearance: none;
+  background-repeat: no-repeat; background-position: right 8px center; background-size: 10px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23444'/%3E%3C/svg%3E");
+}
+.status-select-verfuegbar { background-color: #d9f2e4; color: #16663d; }
+.status-select-krank { background-color: #fdecea; color: var(--rot); }
+.status-select-im_einsatz { background-color: #fef3c7; color: #92400e; }
 .pill-anforderung { background: #ede9fe; color: #5b21b6; }
 
 .anforderung-warnung {

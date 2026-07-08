@@ -10,7 +10,7 @@
 // =====================================================================
 
 const DEMO_CODE = "lara2026";
-const STORAGE_KEY = "vertretungsplan-demo-v2";
+const STORAGE_KEY = "vertretungsplan-demo-v3";
 
 // ---------- Zustand (Beispieldaten + lokale Änderungen) ----------
 let state = ladeZustand();
@@ -420,62 +420,70 @@ function rankingSchliessen() {
 document.getElementById("ranking-back").addEventListener("click", rankingSchliessen);
 
 // ---------- UI: Mitarbeiter ----------
-const statusReihenfolge = ["verfuegbar", "krank", "im_einsatz"];
+// Reihenfolge nur für die Dropdown-Optionen, NICHT für die Sortierung der Liste
+// (die Liste bleibt alphabetisch stabil, damit Einträge beim Statuswechsel
+// nicht in der Liste herumspringen und dadurch "verschwunden" wirken).
+const statusOptionen = ["im_einsatz", "verfuegbar", "krank"];
 
 function zeichneMitarbeiter() {
   const container = document.getElementById("mitarbeiter-liste");
-  const sortiert = [...MITARBEITER].sort((a, b) =>
-    statusReihenfolge.indexOf(statusVon(a)) - statusReihenfolge.indexOf(statusVon(b)) ||
-    a.name.localeCompare(b.name));
+  const sortiert = [...MITARBEITER].sort((a, b) => a.name.localeCompare(b.name));
   container.innerHTML = sortiert.map(m => {
     const betreut = kinderVon(m);
+    const aktuell = statusVon(m);
     return `<div class="card">
       <h3>${m.name}
-        <span class="pill pill-${statusVon(m)} pill-klick" title="Status ändern"
-              onclick="statusWechseln('${m.id}')">${statusText[statusVon(m)]}</span>
         <span class="pill pill-modus">${modusText[m.verkehrsmittel]}</span>
       </h3>
       <div class="meta">📍 ${m.wohnort.adresse} · 📞 ${m.telefon}<br>
-        🎒 Stammkind(er): ${betreut.length ? betreut.map(k => `${k.name} (${k.schule.name})`).join(", ") : "– (Springer)"}<br>
+        🎒 Stammkind(er): ${betreut.length ? betreut.map(k => `${k.name} (${k.schule.name})`).join(", ") : "– (Springer/Pool)"}<br>
         🎓 ${m.qualifikation}</div>
+      <div class="status-zeile">
+        <label class="status-label" for="status-${m.id}">Status</label>
+        <select id="status-${m.id}" class="status-select status-select-${aktuell}"
+                onchange="statusSetzen('${m.id}', this.value)">
+          ${statusOptionen.map(s => `<option value="${s}" ${s === aktuell ? "selected" : ""}>${statusText[s]}</option>`).join("")}
+        </select>
+      </div>
     </div>`;
   }).join("");
 }
 
 // Statuswechsel: Krankmeldung erzeugt AUTOMATISCH einen Vertretungsfall
 // für die Stammkinder des Mitarbeiters und schreibt das Protokoll.
-window.statusWechseln = function (mId) {
+// "verfügbar" erzeugt bewusst KEINEN Fall – das betrifft nur die eigene
+// Einsatzbereitschaft für Vertretungen, nicht das eigene Stammkind.
+window.statusSetzen = function (mId, neu) {
   const m = mitarbeiterMitId(mId);
   const alt = state.mitarbeiterStatus[mId];
-  const neu = statusReihenfolge[(statusReihenfolge.indexOf(alt) + 1) % statusReihenfolge.length];
+  if (alt === neu) return;
   state.mitarbeiterStatus[mId] = neu;
 
+  let neuerFall = false;
   if (neu === "krank") {
     const betroffene = kinderVon(m);
     betroffene.forEach(k => {
       if (!brauchtVertretung(k)) {
         state.vertretungBenoetigt[k.id] = true;
         state.gruende[k.id] = `Stammkraft ${m.name} krankgemeldet`;
+        neuerFall = true;
       }
     });
     const zusatz = betroffene.length
       ? ` → ${betroffene.map(k => k.name).join(", ")} braucht Vertretung` +
         (betroffene.some(k => k.anforderungen?.keineVertretung) ? " (Achtung: keine Vertretung gewünscht!)" : "") +
         (betroffene.some(k => k.anforderungen?.geschlecht) ? " (Anforderung ans Geschlecht beachten!)" : "")
-      : "";
+      : " (kein festes Stammkind betroffen)";
     logEintrag("krankmeldung", `🤒 ${m.name} hat sich krankgemeldet${zusatz}`);
-    if (betroffene.length) {
-      allesNeuZeichnen();
-      document.querySelector('.tab[data-tab="faelle"]').click();
-      return;
-    }
-  } else if (alt === "krank" && neu === "verfuegbar") {
-    logEintrag("info", `💪 ${m.name} wieder gesund/verfügbar`);
+  } else if (alt === "krank") {
+    logEintrag("info", `💪 ${m.name} wieder gesund (jetzt ${statusText[neu]})`);
   } else if (alt === "im_einsatz" && neu === "verfuegbar") {
-    logEintrag("info", `ℹ️ Einsatz beendet – ${m.name} wieder verfügbar`);
+    logEintrag("info", `ℹ️ Einsatz beendet – ${m.name} jetzt verfügbar für Vertretungen`);
   }
+
   speichereZustand();
   allesNeuZeichnen();
+  if (neuerFall) document.querySelector('.tab[data-tab="faelle"]').click();
 };
 
 // ---------- UI: Kinder ----------

@@ -139,16 +139,21 @@ const KINDER = [
 
 // geschlecht: "m" / "w" – wird für Anforderungen wie „nur männliche Vertretung" genutzt.
 // Adressen: fiktive Straßen, echte Orte – Koordinaten auf Straßenniveau für genauere Distanzen.
+//
+// Status-Grundlogik der Beispieldaten: Mitarbeiter mit festem Stammkind starten
+// „im Einsatz" (sie sind normalerweise bei ihrem Kind) – außer den 3 Personen,
+// die im Beispiel bereits krankgemeldet sind (m1, m3, m7). Mitarbeiter OHNE festes
+// Stammkind (Springer/Pool) starten „verfügbar", da sie genau dafür da sind.
 const MITARBEITER = [
   { id: "m1",  name: "Sabine Krüger",   geschlecht: "w", wohnort: { adresse: "Fasanenstieg 7, 22850 Norderstedt (Garstedt)",      lat: 53.6889, lng: 9.9812 }, verkehrsmittel: "auto",  status: "krank",      telefon: "0170 1000001", qualifikation: "Erzieherin, Diabetes-Schulung" },
   { id: "m2",  name: "Jan Petersen",    geschlecht: "m", wohnort: { adresse: "Mühlenkamp 14, 23795 Bad Segeberg",                 lat: 53.9355, lng: 10.3102 }, verkehrsmittel: "auto", status: "im_einsatz", telefon: "0170 1000002", qualifikation: "Heilerziehungspfleger, UK-Erfahrung" },
   { id: "m3",  name: "Melanie Voss",    geschlecht: "w", wohnort: { adresse: "Erlenhof 3, 22844 Norderstedt (Harksheide)",        lat: 53.7301, lng: 10.0154 }, verkehrsmittel: "oepnv", status: "krank",     telefon: "0170 1000003", qualifikation: "Sozialpäd. Assistentin, Autismus-Fortbildung" },
   { id: "m4",  name: "Kerstin Albrecht",geschlecht: "w", wohnort: { adresse: "Wacholderring 21, 24558 Henstedt-Ulzburg (Rhen)",   lat: 53.7618, lng: 9.9985 }, verkehrsmittel: "auto",  status: "verfuegbar", telefon: "0170 1000004", qualifikation: "Erzieherin, Erste-Hilfe am Kind" },
-  { id: "m5",  name: "Deniz Yılmaz",    geschlecht: "m", wohnort: { adresse: "Lindenallee 58, 22846 Norderstedt (Mitte)",         lat: 53.7089, lng: 9.9934 },  verkehrsmittel: "oepnv", status: "verfuegbar", telefon: "0170 1000005", qualifikation: "Schulbegleiter, ADHS-Erfahrung" },
+  { id: "m5",  name: "Deniz Yılmaz",    geschlecht: "m", wohnort: { adresse: "Lindenallee 58, 22846 Norderstedt (Mitte)",         lat: 53.7089, lng: 9.9934 },  verkehrsmittel: "oepnv", status: "im_einsatz", telefon: "0170 1000005", qualifikation: "Schulbegleiter, ADHS-Erfahrung" },
   { id: "m6",  name: "Britta Hansen",   geschlecht: "w", wohnort: { adresse: "Drosselweg 9, 24568 Kaltenkirchen",                 lat: 53.8331, lng: 9.9612 },  verkehrsmittel: "auto",  status: "verfuegbar", telefon: "0170 1000006", qualifikation: "Heilerzieherin, Epilepsie-Einweisung" },
   { id: "m7",  name: "Marco Lehmann",   geschlecht: "m", wohnort: { adresse: "Heidkoppel 4, 24568 Kaltenkirchen (Süd)",           lat: 53.8258, lng: 9.9553 },  verkehrsmittel: "auto",  status: "krank",      telefon: "0170 1000007", qualifikation: "Schulbegleiter" },
   { id: "m8",  name: "Aylin Demir",     geschlecht: "w", wohnort: { adresse: "Ginsterweg 11, 25451 Quickborn",                    lat: 53.7278, lng: 9.9042 },  verkehrsmittel: "oepnv", status: "verfuegbar", telefon: "0170 1000008", qualifikation: "Sozialpäd. Assistentin" },
-  { id: "m9",  name: "Frauke Petersen", geschlecht: "w", wohnort: { adresse: "Kastanienhof 2, 24576 Bad Bramstedt",               lat: 53.9201, lng: 9.8867 },  verkehrsmittel: "auto",  status: "verfuegbar", telefon: "0170 1000009", qualifikation: "Erzieherin, FASD-Fortbildung" },
+  { id: "m9",  name: "Frauke Petersen", geschlecht: "w", wohnort: { adresse: "Kastanienhof 2, 24576 Bad Bramstedt",               lat: 53.9201, lng: 9.8867 },  verkehrsmittel: "auto",  status: "im_einsatz", telefon: "0170 1000009", qualifikation: "Erzieherin, FASD-Fortbildung" },
   { id: "m10", name: "Tobias Brandt",   geschlecht: "m", wohnort: { adresse: "Ahornstraße 16, 25479 Ellerau",                     lat: 53.7549, lng: 9.9218 },  verkehrsmittel: "oepnv", status: "verfuegbar", telefon: "0170 1000010", qualifikation: "Schulbegleiter, Springer" },
   { id: "m11", name: "Nicole Sievers",  geschlecht: "w", wohnort: { adresse: "Buchenkamp 5, 24558 Henstedt-Ulzburg",              lat: 53.7935, lng: 9.9768 },  verkehrsmittel: "auto",  status: "verfuegbar", telefon: "0170 1000011", qualifikation: "Heilerziehungspflegerin" },
   { id: "m12", name: "Sven Otte",       geschlecht: "m", wohnort: { adresse: "Möwenring 8, 23812 Wahlstedt",                      lat: 53.9522, lng: 10.2145 }, verkehrsmittel: "oepnv", status: "verfuegbar", telefon: "0170 1000012", qualifikation: "Schulbegleiter" }
