@@ -202,6 +202,38 @@ a.aktion {
 
 .text-input { width: 100%; padding: 8px; border: 1px solid var(--rand); border-radius: 6px; font-size: .9rem; }
 
+/* ---------- Auswertung: Stunden-Balken ---------- */
+.balken-liste { margin-top: 10px; }
+.balken-zeile {
+  display: grid; grid-template-columns: 130px 1fr 55px; align-items: center;
+  gap: 8px; margin-bottom: 9px; font-size: .82rem;
+}
+.balken-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.balken-spur { background: var(--rand); border-radius: 999px; height: 10px; overflow: hidden; }
+.balken-fuellung { background: var(--blau); height: 100%; border-radius: 999px; }
+.balken-wert { text-align: right; font-variant-numeric: tabular-nums; color: var(--grau); }
+
+/* ---------- Auswertung: Ausfallquote ---------- */
+.quote-gesamt { margin: 8px 0 10px; font-size: .9rem; }
+.quote-liste { display: flex; flex-direction: column; gap: 7px; }
+.quote-zeile { display: flex; justify-content: space-between; align-items: center; font-size: .84rem; gap: 8px; }
+
+/* ---------- Auswertung: Heatmap ---------- */
+.heatmap-grid { margin-top: 10px; }
+.heatmap-kopfzeile, .heatmap-woche {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; margin-bottom: 3px;
+}
+.heatmap-kopfzeile span { text-align: center; font-size: .68rem; color: var(--grau); font-weight: 700; }
+.heatmap-zelle {
+  aspect-ratio: 1; border-radius: 4px; display: flex; align-items: center; justify-content: center;
+  font-size: .66rem; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.heatmap-legende {
+  display: flex; align-items: center; gap: 4px; margin-top: 10px;
+  font-size: .72rem; color: var(--grau);
+}
+.heatmap-legende .heatmap-zelle { width: 14px; height: 14px; aspect-ratio: unset; }
+
 .anforderung-warnung {
   background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px;
   padding: 8px 10px; margin: 8px 0 0; font-size: .82rem; line-height: 1.5;

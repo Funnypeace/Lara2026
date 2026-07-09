@@ -18,7 +18,13 @@ packen und mit echtem Login/Rechteverwaltung versehen (siehe Datenschutz unten).
   - 🚌 ÖPNV: Offline-Schätzwert + Klick-Link, der die echte Verbindung in Google Maps öffnet
   - „✅ zuweisen" trägt die Vertretung für den gewählten Zeitraum ein, setzt den Mitarbeiter für diese Tage auf „im Einsatz" und schreibt den Tagesbericht.
 - **Anforderungen an die Vertretung** pro Kind hinterlegbar: z. B. *nur männliche/weibliche Vertretung* (filtert die Suche), *keine fremde Vertretung gewünscht* (Fall wird angezeigt, aber ohne Suche) oder Freitext-Besonderheiten.
-- **📊 Tagesbericht**: automatisches Protokoll pro Tag – wer hat sich wann krankgemeldet, wer hat wo vertreten. Teilbar per WhatsApp.
+- **📅 Kein Vertretungsbedarf am Wochenende**: Samstag/Sonntag zählen nirgends als offener Tag – der Fälle-Tab zeigt am Wochenende einen Hinweis statt Fällen, und Stunden/Ausfallquote/Heatmap klammern Wochenenden konsequent aus.
+- **📊 Tagesbericht**: automatisches Protokoll pro Tag – wer hat sich wann krankgemeldet, wer hat wo vertreten. Teilbar per WhatsApp oder als **PDF-Export**.
+- **📈 Auswertung (Einsatz-Historie)**:
+  - **Vertretungsstunden pro Mitarbeiter** (nur bereits erfolgte Einsätze, aus der Betreuungszeit des jeweiligen Kindes berechnet)
+  - **Ausfallquote** gesamt und pro Kind (Anteil der Betreuungstage mit Ausfallperiode ohne echte Vertretung)
+  - **Heatmap** der letzten 8 Wochen: an welchen Tagen fielen wie viele Kinder gleichzeitig aus
+  - **Excel-Übersicht** (Mitarbeiter/Kinder/Protokoll als Arbeitsblätter) als Ein-Klick-Download
 - **Steckbriefe**: pro Kind mit Schule, Betreuungszeit, Diagnose, Hinweisen, Anforderungen und Notfallkontakt – inkl. Button **„per WhatsApp senden"** (öffnet WhatsApp mit fertigem Text, passend zum bestehenden WhatsApp-Workflow).
 - **Zugangscode** (Demo): `lara2026`
 
@@ -40,10 +46,17 @@ Diese Demo enthält nur fiktive Daten. Für echte Daten gilt:
 - Der Demo-Zugangscode ist **kein** echter Schutz – für den Produktivbetrieb braucht es einen richtigen Login (z. B. Vercel-Passwortschutz, Supabase Auth).
 - Die Übermittlung von Steckbriefen mit Diagnosen **über WhatsApp** ist datenschutzrechtlich problematisch (US-Anbieter, Meta). Alternativen: Link auf den passwortgeschützten Steckbrief statt Klartext, oder ein Messenger mit AV-Vertrag (z. B. Threema Work, Signal per Dienstgerät).
 
+## Export (PDF/Excel)
+
+Läuft komplett im Browser, ohne Server/Upload – die Bibliotheken
+[jsPDF](https://github.com/parallax/jsPDF) und [SheetJS/xlsx](https://sheetjs.com)
+liegen lokal in `vendor/` (keine CDN-Abhängigkeit, keine Kosten). PDF-Export
+je Tagesbericht (Tab „Bericht"), Excel-Gesamtübersicht im Tab „Auswertung".
+
 ## Mögliche Ausbaustufen
 
 1. **Echte Datenbank** (Vercel Postgres oder Supabase): Daten zentral pflegen statt in `data.js`, Status geräteübergreifend synchron.
 2. **Login & Rollen**: Koordinatorin (alles), Mitarbeiter (nur eigener Status + zugewiesene Steckbriefe).
 3. **Selbstmeldung**: Mitarbeiter melden sich per Handy selbst krank/verfügbar – die Koordinatorin sieht es live.
 4. **Echte ÖPNV-Fahrzeiten** über eine Fahrplan-API (z. B. HVV/NAH.SH-Daten).
-5. **Einsatzhistorie & Dokumentation** der Vertretungen.
+5. **Feiertage** zusätzlich zu Wochenenden von der Vertretungspflicht ausnehmen (aktuell nur Sa/So automatisch erkannt).

@@ -39,6 +39,7 @@
         <button class="tab" data-tab="mitarbeiter">👥 Mitarbeiter</button>
         <button class="tab" data-tab="kinder">🎒 Kinder</button>
         <button class="tab" data-tab="bericht">📊 Bericht</button>
+        <button class="tab" data-tab="auswertung">📈 Auswertung</button>
       </nav>
 
       <section id="tab-faelle" class="tab-content active">
@@ -60,8 +61,22 @@
       </section>
 
       <section id="tab-bericht" class="tab-content">
-        <p class="tab-hint">Tagesübersicht: Wer war krank, wer hat wo vertreten? Krankmeldungen und Zuweisungen werden automatisch protokolliert.</p>
+        <p class="tab-hint">Tagesübersicht: Wer war krank, wer hat wo vertreten? Krankmeldungen und Zuweisungen werden automatisch protokolliert. Jeder Tag lässt sich per WhatsApp teilen oder als PDF exportieren.</p>
         <div id="bericht-liste"></div>
+      </section>
+
+      <section id="tab-auswertung" class="tab-content">
+        <p class="tab-hint">Einsatz-Historie & Auswertungen (nur vergangene/heutige Tage, Wochenenden ausgeklammert).</p>
+        <div id="auswertung-stunden"></div>
+        <div id="auswertung-ausfallquote"></div>
+        <div id="auswertung-heatmap"></div>
+        <div class="card">
+          <h3>📥 Export</h3>
+          <div class="meta">Gesamtübersicht aller Mitarbeiter, Kinder und des Protokolls als Excel-Datei (mehrere Tabellenblätter).</div>
+          <div class="card-actions">
+            <button class="aktion aktion-primaer" onclick="exportExcelGesamt()">📊 Excel-Übersicht exportieren</button>
+          </div>
+        </div>
       </section>
     </aside>
 
@@ -78,6 +93,8 @@
   </footer>
 
   <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="vendor/jspdf/jspdf.umd.min.js"></script>
+  <script src="vendor/xlsx/xlsx.full.min.js"></script>
   <script src="data.js"></script>
   <script src="app.js"></script>
 </body>

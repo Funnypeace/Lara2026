@@ -54,6 +54,25 @@ function imZeitraum(datum, von, bis) {
 }
 function neueId() { return Math.random().toString(36).slice(2, 10); }
 
+// Am Wochenende wird keine Schulbegleitung benötigt – Samstag/Sonntag zählen
+// nirgends als "offener Tag" und erzeugen keine Vertretungsfälle.
+function istWochenende(iso) {
+  const [j, m, t] = iso.split("-").map(Number);
+  const tag = new Date(Date.UTC(j, m - 1, t)).getUTCDay(); // 0=So … 6=Sa
+  return tag === 0 || tag === 6;
+}
+function naechsterWerktag(iso) {
+  let d = iso;
+  while (istWochenende(d)) d = addTage(d, 1);
+  return d;
+}
+function montagDerWoche(iso) {
+  const [j, m, t] = iso.split("-").map(Number);
+  const jsTag = new Date(Date.UTC(j, m - 1, t)).getUTCDay(); // 0=So … 6=Sa
+  const abstandZuMontag = (jsTag + 6) % 7; // Mo=0, Di=1 … So=6
+  return addTage(iso, -abstandZuMontag);
+}
+
 // ---------- Zustand (Beispieldaten + lokale Änderungen) ----------
 let state = ladeZustand();
 
@@ -126,15 +145,17 @@ function periodeAbgedeckt(periode, datum) {
   return periode.zuweisungen.some(z => imZeitraum(datum, z.von, z.bis));
 }
 function offenePeriodeAm(kindId, datum = heuteISO()) {
+  if (istWochenende(datum)) return undefined; // am Wochenende nie ein offener Fall
   return (state.ausfaelle[kindId] || []).find(p => imZeitraum(datum, p.von, p.bis) && !periodeAbgedeckt(p, datum));
 }
-// Liste noch offener Tage einer Periode (Horizont: 14 Tage bei offenem Ende)
+// Liste noch offener (Werk-)Tage einer Periode (Horizont: 14 Tage bei offenem Ende)
 function offeneTageInPeriode(periode) {
   const heute = heuteISO();
   const start = periode.von > heute ? periode.von : heute;
   const ende = periode.bis || addTage(heute, 13);
   const tage = [];
   for (let d = start; d <= ende; d = addTage(d, 1)) {
+    if (istWochenende(d)) continue;
     if (!periodeAbgedeckt(periode, d)) tage.push(d);
   }
   return tage;
@@ -349,6 +370,126 @@ function erfuelltAnforderungen(m, k) {
   return true;
 }
 
+// ---------- Einsatz-Historie & Auswertungen ----------
+// Wertet aus, wie viele Stunden pro Tag ein Kind betreut wird und an
+// welchen Wochentagen (aus dem Freitext "Mo–Fr 07:45–13:30 Uhr" o. Ä.),
+// damit Stunden/Ausfallquote nicht pauschal, sondern kindgenau berechnet werden.
+const WOCHENTAGE_MO_SO = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]; // Index 0=Mo … 6=So
+function jsTagZuMoIndex(jsTag) { return (jsTag + 6) % 7; } // JS: 0=So..6=Sa → 0=Mo..6=So
+
+function parseBetreuungszeit(text) {
+  const zeitMatch = text.match(/(\d{2}):(\d{2})\s*[–-]\s*(\d{2}):(\d{2})/);
+  let stundenProTag = 5;
+  if (zeitMatch) {
+    const [h1, m1, h2, m2] = zeitMatch.slice(1).map(Number);
+    stundenProTag = (h2 * 60 + m2 - (h1 * 60 + m1)) / 60;
+  }
+  let moIndizes = new Set([0, 1, 2, 3, 4]); // Standard Mo–Fr
+  const tageMatch = text.match(/(Mo|Di|Mi|Do|Fr|Sa|So)\s*[–-]\s*(Mo|Di|Mi|Do|Fr|Sa|So)/);
+  if (tageMatch) {
+    const start = WOCHENTAGE_MO_SO.indexOf(tageMatch[1]);
+    const ende = WOCHENTAGE_MO_SO.indexOf(tageMatch[2]);
+    moIndizes = new Set();
+    for (let i = start; ; i = (i + 1) % 7) {
+      moIndizes.add(i);
+      if (i === ende) break;
+    }
+  }
+  return { stundenProTag, moIndizes };
+}
+const BETREUUNG_INFO = Object.fromEntries(KINDER.map(k => [k.id, parseBetreuungszeit(k.betreuungszeit)]));
+
+function tagPasstZuBetreuung(iso, info) {
+  if (istWochenende(iso)) return false;
+  const [j, m, t] = iso.split("-").map(Number);
+  const jsTag = new Date(Date.UTC(j, m - 1, t)).getUTCDay();
+  return info.moIndizes.has(jsTagZuMoIndex(jsTag));
+}
+
+// Vertretungsstunden je Mitarbeiter – zählt nur bereits erfolgte (echte)
+// Zuweisungen bis einschließlich heute, keine nur geplanten Zukunftstage.
+function berechneVertretungsstunden() {
+  const heute = heuteISO();
+  const stunden = {};
+  KINDER.forEach(k => {
+    const info = BETREUUNG_INFO[k.id];
+    (state.ausfaelle[k.id] || []).forEach(periode => {
+      periode.zuweisungen.forEach(z => {
+        if (!z.mitarbeiterId) return;
+        const bisEffektiv = z.bis && z.bis < heute ? z.bis : heute;
+        if (z.von > bisEffektiv) return;
+        for (let d = z.von; d <= bisEffektiv; d = addTage(d, 1)) {
+          if (tagPasstZuBetreuung(d, info)) {
+            stunden[z.mitarbeiterId] = (stunden[z.mitarbeiterId] || 0) + info.stundenProTag;
+          }
+        }
+      });
+    });
+  });
+  return stunden;
+}
+
+// Ausfallquote: Anteil der (bereits vergangenen/heutigen) Betreuungstage mit
+// Ausfallperiode, an denen KEINE echte Vertretung stattfand.
+function berechneAusfallquote() {
+  const heute = heuteISO();
+  const proKind = {};
+  let gesamtTage = 0, gesamtOhne = 0;
+  KINDER.forEach(k => {
+    const info = BETREUUNG_INFO[k.id];
+    let tage = 0, ohne = 0;
+    (state.ausfaelle[k.id] || []).forEach(periode => {
+      const periodeEnde = periode.bis || heute;
+      const bisEffektiv = periodeEnde < heute ? periodeEnde : heute;
+      if (periode.von > bisEffektiv) return;
+      for (let d = periode.von; d <= bisEffektiv; d = addTage(d, 1)) {
+        if (!tagPasstZuBetreuung(d, info)) continue;
+        tage++;
+        const echtAbgedeckt = periode.zuweisungen.some(z => z.mitarbeiterId && imZeitraum(d, z.von, z.bis));
+        if (!echtAbgedeckt) ohne++;
+      }
+    });
+    proKind[k.id] = { tage, ohne };
+    gesamtTage += tage; gesamtOhne += ohne;
+  });
+  return { proKind, gesamt: { tage: gesamtTage, ohne: gesamtOhne } };
+}
+
+// Heatmap: Anzahl gleichzeitiger Ausfälle pro Werktag, letzte N Wochen.
+function berechneHeatmap(wochenAnzahl = 8) {
+  const heute = heuteISO();
+  // Letzte Woche = die AKTUELLE Woche (enthält "heute"), davor (wochenAnzahl-1)
+  // weitere volle Wochen – so ist "heute" garantiert in der Heatmap sichtbar.
+  const start = addTage(montagDerWoche(heute), -(wochenAnzahl - 1) * 7);
+
+  const zaehlerProTag = {};
+  KINDER.forEach(k => {
+    (state.ausfaelle[k.id] || []).forEach(periode => {
+      const periodeEnde = periode.bis || heute;
+      const von = periode.von > start ? periode.von : start;
+      const bis = periodeEnde < heute ? periodeEnde : heute;
+      if (von > bis) return;
+      for (let d = von; d <= bis; d = addTage(d, 1)) {
+        if (istWochenende(d)) continue;
+        zaehlerProTag[d] = (zaehlerProTag[d] || 0) + 1;
+      }
+    });
+  });
+
+  const wochen = [];
+  let d = start;
+  for (let w = 0; w < wochenAnzahl; w++) {
+    const tage = [];
+    for (let i = 0; i < 5; i++) {
+      tage.push({ datum: d, anzahl: zaehlerProTag[d] || 0 });
+      d = addTage(d, 1);
+    }
+    d = addTage(d, 2); // Sa + So überspringen
+    wochen.push(tage);
+  }
+  return wochen;
+}
+
 // ---------- UI: Kopfzeile ----------
 function zeichneStats() {
   const heute = heuteISO();
@@ -375,13 +516,20 @@ document.querySelectorAll(".tab").forEach(btn => {
 function zeichneFaelle() {
   const container = document.getElementById("faelle-liste");
   const heute = heuteISO();
+
+  if (istWochenende(heute)) {
+    container.innerHTML = `<div class="card"><h3>🗓️ Wochenende</h3>
+      <div class="meta">Am Wochenende wird keine Schulbegleitung benötigt – hier entstehen keine Vertretungsfälle. Nächster Werktag: ${datumDE(naechsterWerktag(heute))}.</div></div>`;
+    return;
+  }
+
   const faelle = KINDER
     .map(k => ({ k, periode: offenePeriodeAm(k.id, heute) }))
     .filter(f => f.periode);
 
   if (!faelle.length) {
     container.innerHTML = `<div class="card"><h3>✅ Keine offenen Fälle heute</h3>
-      <div class="meta">Meldet sich ein Mitarbeiter mit festem Kind krank (Tab „Mitarbeiter"), entsteht hier automatisch ein Fall für den betroffenen Zeitraum – ohne tägliches Nachpflegen.</div></div>`;
+      <div class="meta">Meldet sich ein Mitarbeiter mit festem Kind krank (Tab „Mitarbeiter"), entsteht hier automatisch ein Fall für den betroffenen Zeitraum – ohne tägliches Nachpflegen. Wochenenden werden dabei automatisch übersprungen.</div></div>`;
     return;
   }
 
@@ -435,8 +583,8 @@ window.sucheVertretung = async function (kindId, periodeId) {
   map.setView([kind.schule.lat, kind.schule.lng], 12);
 
   const heute = heuteISO();
-  const vonDefault = periode.von > heute ? periode.von : heute;
-  const bisDefault = periode.bis || vonDefault;
+  const vonDefault = naechsterWerktag(periode.von > heute ? periode.von : heute);
+  const bisDefault = periode.bis && periode.bis >= vonDefault ? periode.bis : vonDefault;
   const minAttr = ` min="${periode.von}"`;
   const maxAttr = periode.bis ? ` max="${periode.bis}"` : "";
 
@@ -768,10 +916,187 @@ function zeichneBericht() {
       <div class="card-actions">
         <a class="aktion aktion-whatsapp" target="_blank" rel="noopener"
            href="https://wa.me/?text=${encodeURIComponent(berichtText(datum, eintraege))}">💬 Bericht per WhatsApp teilen</a>
+        <button class="aktion aktion-sekundaer" onclick="exportTagesberichtPDF('${datum}')">📄 Als PDF exportieren</button>
       </div>
     </div>`;
   }).join("");
 }
+
+// ---------- UI: Auswertung (Historie, Stunden, Ausfallquote, Heatmap) ----------
+function zeichneAuswertungStunden() {
+  const stunden = berechneVertretungsstunden();
+  const eintraege = MITARBEITER.map(m => ({ m, h: stunden[m.id] || 0 }))
+    .filter(e => e.h > 0)
+    .sort((a, b) => b.h - a.h);
+  const max = Math.max(1, ...eintraege.map(e => e.h));
+
+  document.getElementById("auswertung-stunden").innerHTML = `
+    <div class="card">
+      <h3>🕒 Vertretungsstunden bisher</h3>
+      <div class="meta">Geleistete Vertretungseinsätze (nur vergangene/heutige Tage; Wochenenden ausgenommen)</div>
+      <div class="balken-liste">
+        ${eintraege.length ? eintraege.map(e => `
+          <div class="balken-zeile">
+            <span class="balken-label">${e.m.name}</span>
+            <div class="balken-spur"><div class="balken-fuellung" style="width:${(e.h / max * 100).toFixed(0)}%"></div></div>
+            <span class="balken-wert">${e.h.toFixed(1)} h</span>
+          </div>`).join("") : '<div class="meta">Noch keine abgeschlossenen Vertretungseinsätze.</div>'}
+      </div>
+    </div>`;
+}
+
+function zeichneAuswertungAusfallquote() {
+  const { proKind, gesamt } = berechneAusfallquote();
+  const quoteGesamt = gesamt.tage ? Math.round(gesamt.ohne / gesamt.tage * 100) : 0;
+
+  document.getElementById("auswertung-ausfallquote").innerHTML = `
+    <div class="card">
+      <h3>📉 Ausfallquote</h3>
+      <div class="meta">Anteil der Betreuungstage mit Ausfallperiode ohne echte Vertretung (nur vergangene/heutige Tage)</div>
+      <div class="quote-gesamt">Gesamt: <b>${quoteGesamt}%</b>
+        <span class="meta">(${gesamt.ohne} von ${gesamt.tage} betroffenen Tagen ohne Vertretung)</span></div>
+      <div class="quote-liste">
+        ${KINDER.map(k => {
+          const s = proKind[k.id];
+          if (!s || !s.tage) return "";
+          const q = Math.round(s.ohne / s.tage * 100);
+          const pillKlasse = q > 30 ? "pill-krank" : q > 0 ? "pill-anforderung" : "pill-verfuegbar";
+          return `<div class="quote-zeile"><span>${k.name}</span><span class="pill ${pillKlasse}">${q}% (${s.ohne}/${s.tage})</span></div>`;
+        }).join("") || '<div class="meta">Noch keine Ausfalltage erfasst.</div>'}
+      </div>
+    </div>`;
+}
+
+function heatStil(n) {
+  if (n === 0) return { bg: "#cde2fb", fg: "#0b0b0b" };
+  if (n === 1) return { bg: "#86b6ef", fg: "#0b0b0b" };
+  if (n === 2) return { bg: "#3987e5", fg: "#ffffff" };
+  if (n === 3) return { bg: "#1c5cab", fg: "#ffffff" };
+  return { bg: "#0d366b", fg: "#ffffff" };
+}
+
+function zeichneAuswertungHeatmap() {
+  const wochen = berechneHeatmap(8);
+  const tageKopf = ["Mo", "Di", "Mi", "Do", "Fr"];
+
+  document.getElementById("auswertung-heatmap").innerHTML = `
+    <div class="card">
+      <h3>🗓️ Heatmap: gleichzeitige Ausfälle</h3>
+      <div class="meta">Anzahl Kinder mit Ausfallperiode an dem Tag, letzte 8 Wochen – Wochenenden ausgeklammert</div>
+      <div class="heatmap-grid">
+        <div class="heatmap-kopfzeile">${tageKopf.map(t => `<span>${t}</span>`).join("")}</div>
+        ${wochen.map(woche => `<div class="heatmap-woche">
+          ${woche.map(tag => {
+            const { bg, fg } = heatStil(tag.anzahl);
+            return `<span class="heatmap-zelle" style="background:${bg};color:${fg}" title="${datumDE(tag.datum)}: ${tag.anzahl} Ausfall/Ausfälle">${tag.anzahl || ""}</span>`;
+          }).join("")}
+        </div>`).join("")}
+      </div>
+      <div class="heatmap-legende">
+        <span>Weniger</span>
+        <span class="heatmap-zelle" style="background:${heatStil(0).bg}"></span>
+        <span class="heatmap-zelle" style="background:${heatStil(1).bg}"></span>
+        <span class="heatmap-zelle" style="background:${heatStil(2).bg}"></span>
+        <span class="heatmap-zelle" style="background:${heatStil(3).bg}"></span>
+        <span class="heatmap-zelle" style="background:${heatStil(4).bg}"></span>
+        <span>Mehr</span>
+      </div>
+    </div>`;
+}
+
+function zeichneAuswertung() {
+  zeichneAuswertungStunden();
+  zeichneAuswertungAusfallquote();
+  zeichneAuswertungHeatmap();
+}
+
+// ---------- Export: PDF-Tagesbericht & Excel-Übersicht ----------
+// jsPDFs Standardschrift kann die meisten Emojis nicht darstellen (Kästchen
+// statt Symbol) – für den PDF-Export werden sie deshalb entfernt, im Rest
+// der App (WhatsApp, Bildschirm) bleiben sie erhalten.
+function entferneEmojiUndMarkdown(text) {
+  return text
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/gu, "")
+    .replace(/\*/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+window.exportTagesberichtPDF = function (datum) {
+  const eintraege = state.protokoll.filter(e => e.datum === datum).sort((a, b) => a.zeit.localeCompare(b.zeit));
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const marginX = 15;
+  let y = 20;
+
+  doc.setFontSize(16);
+  doc.text(`Tagesbericht Vertretung - ${datumDE(datum)}`, marginX, y);
+  y += 12;
+  doc.setFontSize(11);
+
+  if (!eintraege.length) {
+    doc.text("Keine Einträge für diesen Tag.", marginX, y);
+  }
+  eintraege.forEach(e => {
+    const zeilen = doc.splitTextToSize(`${e.zeit} Uhr - ${entferneEmojiUndMarkdown(e.text)}`, 180);
+    zeilen.forEach(zeile => {
+      if (y > 280) { doc.addPage(); y = 20; }
+      doc.text(zeile, marginX, y);
+      y += 7;
+    });
+  });
+
+  doc.save(`Tagesbericht_${datum}.pdf`);
+  logEintrag("info", `📄 Tagesbericht ${datumDE(datum)} als PDF exportiert`);
+};
+
+window.exportExcelGesamt = function () {
+  const heute = heuteISO();
+  const stunden = berechneVertretungsstunden();
+  const { proKind, gesamt } = berechneAusfallquote();
+
+  const mitarbeiterZeilen = [
+    ["Name", "Typ", "Status heute", "Verkehrsmittel", "Stammkind(er)", "Vertretungsstunden bisher"],
+    ...MITARBEITER.map(m => [
+      m.name,
+      state.mitarbeiterTyp[m.id] === "fest" ? "Fest" : "Springer/Pool",
+      statusText[statusVon(m, heute)],
+      m.verkehrsmittel === "auto" ? "Auto" : "ÖPNV",
+      kinderVon(m).map(k => k.name).join(", ") || "–",
+      Number((stunden[m.id] || 0).toFixed(1))
+    ])
+  ];
+
+  const kinderZeilen = [
+    ["Name", "Schule", "Stammkraft", "Ausfalltage bisher", "davon ohne Vertretung", "Ausfallquote", "Anforderungen"],
+    ...KINDER.map(k => {
+      const s = proKind[k.id] || { tage: 0, ohne: 0 };
+      const stamm = mitarbeiterMitId(k.stammkraft);
+      return [
+        k.name, k.schule.name, stamm ? stamm.name : "–",
+        s.tage, s.ohne,
+        s.tage ? `${Math.round(s.ohne / s.tage * 100)}%` : "0%",
+        anforderungsText(k) || "–"
+      ];
+    }),
+    [],
+    ["Gesamt", "", "", gesamt.tage, gesamt.ohne, gesamt.tage ? `${Math.round(gesamt.ohne / gesamt.tage * 100)}%` : "0%", ""]
+  ];
+
+  const protokollZeilen = [
+    ["Datum", "Zeit", "Typ", "Text"],
+    ...[...state.protokoll]
+      .sort((a, b) => (a.datum + a.zeit).localeCompare(b.datum + b.zeit))
+      .map(e => [e.datum, e.zeit, e.typ, e.text])
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(mitarbeiterZeilen), "Mitarbeiter");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(kinderZeilen), "Kinder");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(protokollZeilen), "Protokoll");
+  XLSX.writeFile(wb, `Vertretungsplan_Uebersicht_${heute}.xlsx`);
+  logEintrag("info", "📊 Excel-Gesamtübersicht exportiert");
+};
 
 // ---------- UI: Steckbrief-Modal ----------
 const modalOverlay = document.getElementById("modal-overlay");
@@ -812,6 +1137,7 @@ function allesNeuZeichnen() {
   zeichneMitarbeiter();
   zeichneKinder();
   zeichneBericht();
+  zeichneAuswertung();
   zeichneMarker();
 }
 allesNeuZeichnen();
