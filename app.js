@@ -385,6 +385,13 @@ function erfuelltAnforderungen(m, k) {
   return true;
 }
 
+// ---------- Suche (Mitarbeiter- und Kinder-Tab) ----------
+function entsprichtSuche(suchtext, ...felder) {
+  const q = (suchtext || "").trim().toLowerCase();
+  if (!q) return true;
+  return felder.some(f => (f || "").toLowerCase().includes(q));
+}
+
 // ---------- Einsatz-Historie & Auswertungen ----------
 // Wertet aus, wie viele Stunden pro Tag ein Kind betreut wird und an
 // welchen Wochentagen (aus dem Freitext "Mo–Fr 07:45–13:30 Uhr" o. Ä.),
@@ -761,7 +768,19 @@ const statusOptionen = ["krank", "verfuegbar", "im_einsatz"];
 function zeichneMitarbeiter() {
   const container = document.getElementById("mitarbeiter-liste");
   const heute = heuteISO();
-  const sortiert = [...MITARBEITER].sort((a, b) => a.name.localeCompare(b.name));
+  const suchtext = document.getElementById("mitarbeiter-suche")?.value || "";
+  const sortiert = MITARBEITER
+    .filter(m => entsprichtSuche(
+      suchtext, m.name, m.wohnort.adresse, m.qualifikation,
+      kinderVon(m).map(k => k.name).join(" "),
+      state.mitarbeiterTyp[m.id] === "fest" ? "fest eigenes kind" : "springer pool"
+    ))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  if (!sortiert.length) {
+    container.innerHTML = `<div class="card"><div class="meta">Keine Treffer für „${suchtext}".</div></div>`;
+    return;
+  }
 
   container.innerHTML = sortiert.map(m => {
     const betreut = kinderVon(m);
@@ -867,8 +886,18 @@ window.statusPeriodeLoeschen = function (mId, periodeId) {
 function zeichneKinder() {
   const container = document.getElementById("kinder-liste");
   const heute = heuteISO();
+  const suchtext = document.getElementById("kinder-suche")?.value || "";
+  const gefiltert = KINDER.filter(k => {
+    const stamm = mitarbeiterMitId(k.stammkraft);
+    return entsprichtSuche(suchtext, k.name, k.schule.name, k.klasse, stamm ? stamm.name : "");
+  });
 
-  container.innerHTML = KINDER.map(k => {
+  if (!gefiltert.length) {
+    container.innerHTML = `<div class="card"><div class="meta">Keine Treffer für „${suchtext}".</div></div>`;
+    return;
+  }
+
+  container.innerHTML = gefiltert.map(k => {
     const stamm = mitarbeiterMitId(k.stammkraft);
     const offenHeute = !!offenePeriodeAm(k.id, heute);
     const perioden = (state.ausfaelle[k.id] || []).filter(p => !p.bis || p.bis >= heute);
@@ -1342,6 +1371,11 @@ function allesNeuZeichnen() {
   zeichneMarker();
 }
 allesNeuZeichnen();
+
+// Suchfelder: nur die jeweilige Liste neu zeichnen (nicht die Karte/andere
+// Tabs), damit die Suche beim Tippen sofort und ohne Nebenwirkungen filtert.
+document.getElementById("mitarbeiter-suche").addEventListener("input", zeichneMitarbeiter);
+document.getElementById("kinder-suche").addEventListener("input", zeichneKinder);
 
 // Monats-Auswahl (Excel-Monatsübersicht) mit dem aktuellen Monat vorbelegen.
 // Das Element ist statisches HTML (nicht Teil eines re-render-Zyklus),

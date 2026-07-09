@@ -85,6 +85,13 @@ main { flex: 1; display: flex; min-height: 0; }
 .tab-content.active { display: block; }
 .tab-hint { font-size: .8rem; color: var(--grau); margin: 0 0 10px; line-height: 1.7; }
 
+.suchfeld {
+  width: 100%; padding: 9px 12px; margin-bottom: 12px; font-size: .88rem;
+  border: 1px solid var(--rand); border-radius: 8px; background: #fff;
+  box-sizing: border-box;
+}
+.suchfeld:focus { outline: none; border-color: var(--blau); box-shadow: 0 0 0 3px rgba(29,95,168,.12); }
+
 /* ---------- Karten/Listen ---------- */
 .card {
   background: #fff; border: 1px solid var(--rand); border-radius: var(--radius);
