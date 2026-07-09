@@ -80,7 +80,13 @@ function ladeZustand() {
 }
 
 function speichereZustand() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  // Ohne try/catch würde ein blockierter localStorage (privater Modus,
+  // eingebettete Browser, strenge Datenschutz-Einstellungen) jede
+  // Statusänderung/Zuweisung mit einem Fehler abbrechen. Im Fehlerfall
+  // funktioniert die App weiter, nur bleiben Änderungen nicht über einen
+  // Neuladen hinweg gespeichert.
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+  catch (e) { console.warn("Konnte Zustand nicht speichern (localStorage nicht verfügbar):", e); }
 }
 
 const kinderVon = m => KINDER.filter(k => k.stammkraft === m.id);
@@ -135,7 +141,11 @@ const loginBtn = document.getElementById("login-btn");
 
 function pruefeLogin() {
   if (loginInput.value.trim().toLowerCase() === DEMO_CODE) {
-    sessionStorage.setItem("vp-login", "ok");
+    // sessionStorage kann in privaten/eingebetteten Browsern (z. B. In-App-
+    // Browser von WhatsApp/Instagram, strenge Datenschutz-Einstellungen)
+    // einen Fehler werfen. Ohne try/catch würde das den Login blockieren,
+    // obwohl der Code richtig war – daher hier bewusst robust.
+    try { sessionStorage.setItem("vp-login", "ok"); } catch (e) { /* kein Speicherzugriff möglich, egal */ }
     loginOverlay.classList.add("hidden");
     setTimeout(() => map.invalidateSize(), 100);
   } else {
@@ -145,7 +155,9 @@ function pruefeLogin() {
 }
 loginBtn.addEventListener("click", pruefeLogin);
 loginInput.addEventListener("keydown", e => { if (e.key === "Enter") pruefeLogin(); });
-if (sessionStorage.getItem("vp-login") === "ok") loginOverlay.classList.add("hidden");
+try {
+  if (sessionStorage.getItem("vp-login") === "ok") loginOverlay.classList.add("hidden");
+} catch (e) { /* kein Speicherzugriff möglich – Login-Maske einfach anzeigen */ }
 
 // ---------- Karte ----------
 const map = L.map("map").setView([53.80, 10.05], 10);
