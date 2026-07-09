@@ -25,12 +25,24 @@ const DEMO_CODE = "lara2026";
 const STORAGE_KEY = "vertretungsplan-demo-v4";
 
 // ---------- Datumshilfen ----------
-function heuteISO() { return new Date().toISOString().slice(0, 10); }
+// WICHTIG: "heute" bewusst als LOKALES Kalenderdatum (nicht UTC) – sonst
+// weicht "heute" je nach Zeitzone der Nutzerin vom tatsächlichen Tag ab.
+function heuteISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 function jetztZeit() { return new Date().toTimeString().slice(0, 5); }
+// Rechnet ausschließlich mit Date.UTC/getUTCDate – das ist zeitzonen- und
+// DST-sicher. Eine frühere Version mischte lokale Zeit (new Date(iso+"T00:00:00"))
+// mit UTC-Ausgabe (toISOString()): in Zeitzonen mit positivem UTC-Versatz
+// (z. B. Deutschland, UTC+1/+2) gab addTage(datum, 1) dadurch dasselbe Datum
+// zurück statt des nächsten Tages – das ließ die Tage-Schleife in
+// offeneTageInPeriode() endlos laufen und den Browser einfrieren.
 function addTage(iso, n) {
-  const d = new Date(iso + "T00:00:00");
-  d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
+  const [j, m, t] = iso.split("-").map(Number);
+  const d = new Date(Date.UTC(j, m - 1, t));
+  d.setUTCDate(d.getUTCDate() + n);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 }
 function datumDE(iso) {
   const [j, m, t] = iso.split("-");
