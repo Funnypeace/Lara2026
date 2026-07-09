@@ -5,30 +5,73 @@
 // Auto-Routen: OSRM (OpenStreetMap-basiert, kostenlos, kein API-Key) –
 //   fällt der Dienst aus, rechnet die App OFFLINE mit Luftlinie weiter.
 // ÖPNV: Offline-Schätzung + Deep-Link zur echten Verbindungsauskunft.
-// Alle Änderungen (Status, Fälle, Protokoll) landen im localStorage –
-// im späteren Produktivbetrieb ersetzt die IT das durch Server + Login.
+//
+// Status (Mitarbeiter) und Vertretungsbedarf (Kinder) sind ZEITRAUM-
+// basiert (von–bis statt einem einfachen Ja/Nein-Schalter):
+//  - Ein Mitarbeiter kann "krank von 09.07. bis 12.07." hinterlegt werden
+//    und springt danach automatisch auf seinen Grundstatus zurück
+//    (kein tägliches Nachpflegen nötig).
+//  - Ein Vertretungsfall für ein Kind ist ein Zeitraum (Ausfallperiode).
+//    Eine Zuweisung deckt nur die Tage ab, für die sie gilt – ist nur
+//    EIN Tag zugewiesen, taucht der Fall am nächsten Tag automatisch
+//    wieder als offen auf. Zuweisungen können auch für die Zukunft
+//    im Voraus hinterlegt werden.
+//
+// Alle Änderungen landen im localStorage – im späteren Produktivbetrieb
+// ersetzt die IT das durch Server + Login.
 // =====================================================================
 
 const DEMO_CODE = "lara2026";
-const STORAGE_KEY = "vertretungsplan-demo-v3";
+const STORAGE_KEY = "vertretungsplan-demo-v4";
+
+// ---------- Datumshilfen ----------
+function heuteISO() { return new Date().toISOString().slice(0, 10); }
+function jetztZeit() { return new Date().toTimeString().slice(0, 5); }
+function addTage(iso, n) {
+  const d = new Date(iso + "T00:00:00");
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function datumDE(iso) {
+  const [j, m, t] = iso.split("-");
+  return `${t}.${m}.${j}`;
+}
+// prüft, ob "datum" im Zeitraum [von, bis] liegt – bis === null/"" bedeutet "bis auf Weiteres"
+function imZeitraum(datum, von, bis) {
+  return datum >= von && (!bis || datum <= bis);
+}
+function neueId() { return Math.random().toString(36).slice(2, 10); }
 
 // ---------- Zustand (Beispieldaten + lokale Änderungen) ----------
 let state = ladeZustand();
 
 function ladeZustand() {
+  const heute = heuteISO();
   const basis = {
-    mitarbeiterStatus: Object.fromEntries(MITARBEITER.map(m => [m.id, m.status])),
-    vertretungBenoetigt: Object.fromEntries(KINDER.map(k => [k.id, k.vertretungBenoetigt])),
-    gruende: Object.fromEntries(KINDER.map(k => [k.id, k.grund])),
+    mitarbeiterTyp: Object.fromEntries(MITARBEITER.map(m => [m.id, m.typ])),
+    statusPerioden: Object.fromEntries(MITARBEITER.map(m => [m.id, []])),
+    ausfaelle: Object.fromEntries(KINDER.map(k => [k.id, []])),
     protokoll: [...BEISPIEL_PROTOKOLL]
   };
+
+  // Beispiel-Ausgangslage: 3 Mitarbeiter sind bereits krankgemeldet
+  // (mit Enddatum – zeigt die automatische Rückkehr zum Grundstatus).
+  basis.statusPerioden.m1 = [{ id: "seed-m1", status: "krank", von: heute, bis: addTage(heute, 2), grund: "Beispiel-Krankmeldung" }];
+  basis.statusPerioden.m3 = [{ id: "seed-m3", status: "krank", von: heute, bis: addTage(heute, 4), grund: "Beispiel-Krankmeldung (bis Fr.)" }];
+  basis.statusPerioden.m7 = [{ id: "seed-m7", status: "krank", von: heute, bis: heute, grund: "Beispiel-Krankmeldung" }];
+
+  // Passende Ausfallperioden für deren Stammkinder
+  basis.ausfaelle.k3 = [{ id: "seed-k3", von: heute, bis: addTage(heute, 2), grund: "Stammkraft Sabine Krüger krankgemeldet", zuweisungen: [] }];
+  basis.ausfaelle.k1 = [{ id: "seed-k1", von: heute, bis: addTage(heute, 4), grund: "Stammkraft Melanie Voss krankgemeldet (bis Fr.)", zuweisungen: [] }];
+  basis.ausfaelle.k4 = [{ id: "seed-k4", von: heute, bis: heute, grund: "Stammkraft Marco Lehmann krankgemeldet", zuweisungen: [] }];
+
   try {
     const gespeichert = JSON.parse(localStorage.getItem(STORAGE_KEY));
     if (gespeichert) {
       return {
-        mitarbeiterStatus: { ...basis.mitarbeiterStatus, ...gespeichert.mitarbeiterStatus },
-        vertretungBenoetigt: { ...basis.vertretungBenoetigt, ...gespeichert.vertretungBenoetigt },
-        gruende: { ...basis.gruende, ...gespeichert.gruende },
+        mitarbeiterTyp: { ...basis.mitarbeiterTyp, ...gespeichert.mitarbeiterTyp },
+        statusPerioden: { ...basis.statusPerioden, ...gespeichert.statusPerioden },
+        ausfaelle: { ...basis.ausfaelle, ...gespeichert.ausfaelle },
         protokoll: Array.isArray(gespeichert.protokoll) ? gespeichert.protokoll : basis.protokoll
       };
     }
@@ -40,20 +83,46 @@ function speichereZustand() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-const statusVon = m => state.mitarbeiterStatus[m.id];
-const brauchtVertretung = k => state.vertretungBenoetigt[k.id];
 const kinderVon = m => KINDER.filter(k => k.stammkraft === m.id);
 const mitarbeiterMitId = id => MITARBEITER.find(m => m.id === id);
 const kindMitId = id => KINDER.find(k => k.id === id);
 
-// ---------- Protokoll ----------
-function heuteISO() { return new Date().toISOString().slice(0, 10); }
-function jetztZeit() { return new Date().toTimeString().slice(0, 5); }
-function datumDE(iso) {
-  const [j, m, t] = iso.split("-");
-  return `${t}.${m}.${j}`;
+// ---------- Status (zeitraumbasiert) ----------
+function aktuelleStatusPeriode(m, datum = heuteISO()) {
+  const perioden = state.statusPerioden[m.id] || [];
+  for (let i = perioden.length - 1; i >= 0; i--) {
+    if (imZeitraum(datum, perioden[i].von, perioden[i].bis)) return perioden[i];
+  }
+  return null;
+}
+function grundstatus(m) {
+  return state.mitarbeiterTyp[m.id] === "springer" ? "verfuegbar" : "im_einsatz";
+}
+function statusVon(m, datum = heuteISO()) {
+  const p = aktuelleStatusPeriode(m, datum);
+  return p ? p.status : grundstatus(m);
 }
 
+// ---------- Vertretungsfälle (zeitraumbasiert) ----------
+function periodeAbgedeckt(periode, datum) {
+  return periode.zuweisungen.some(z => imZeitraum(datum, z.von, z.bis));
+}
+function offenePeriodeAm(kindId, datum = heuteISO()) {
+  return (state.ausfaelle[kindId] || []).find(p => imZeitraum(datum, p.von, p.bis) && !periodeAbgedeckt(p, datum));
+}
+// Liste noch offener Tage einer Periode (Horizont: 14 Tage bei offenem Ende)
+function offeneTageInPeriode(periode) {
+  const heute = heuteISO();
+  const start = periode.von > heute ? periode.von : heute;
+  const ende = periode.bis || addTage(heute, 13);
+  const tage = [];
+  for (let d = start; d <= ende; d = addTage(d, 1)) {
+    if (!periodeAbgedeckt(periode, d)) tage.push(d);
+  }
+  return tage;
+}
+
+// ---------- Protokoll ----------
 function logEintrag(typ, text) {
   state.protokoll.push({ datum: heuteISO(), zeit: jetztZeit(), typ, text });
   speichereZustand();
@@ -114,11 +183,12 @@ function mitarbeiterIcon(m) {
 
 function zeichneMarker() {
   markerEbene.clearLayers();
+  const heute = heuteISO();
 
   KINDER.forEach(k => {
-    const alarm = brauchtVertretung(k);
+    const alarm = !!offenePeriodeAm(k.id, heute);
     L.marker([k.schule.lat, k.schule.lng], { icon: schulIcon(alarm) })
-      .bindPopup(`<b>${k.name}</b> (${k.klasse})<br>🏫 ${k.schule.name}<br>${alarm ? "🚨 <b>Vertretung benötigt!</b><br>" : ""}
+      .bindPopup(`<b>${k.name}</b> (${k.klasse})<br>🏫 ${k.schule.name}<br>${alarm ? "🚨 <b>Vertretung heute benötigt!</b><br>" : ""}
         <a href="#" onclick="oeffneSteckbrief('${k.id}');return false;">📋 Steckbrief öffnen</a>`)
       .addTo(markerEbene);
   });
@@ -215,9 +285,10 @@ function whatsappSteckbriefLink(k) {
   return `https://wa.me/?text=${encodeURIComponent(steckbriefText(k))}`;
 }
 
-function whatsappAnfrageLink(m, kind, dauerText) {
+function whatsappAnfrageLink(m, kind, dauerText, von, bis) {
+  const zeitraum = von === bis ? `am ${datumDE(von)}` : `von ${datumDE(von)} bis ${datumDE(bis)}`;
   const text = [
-    `Hallo ${m.name.split(" ")[0]}, kannst du die Vertretung für *${kind.name}* übernehmen?`,
+    `Hallo ${m.name.split(" ")[0]}, kannst du ${zeitraum} die Vertretung für *${kind.name}* übernehmen?`,
     ``,
     `🏫 ${kind.schule.name}, ${kind.schule.adresse}`,
     `🕐 ${kind.betreuungszeit}`,
@@ -256,11 +327,12 @@ function erfuelltAnforderungen(m, k) {
 
 // ---------- UI: Kopfzeile ----------
 function zeichneStats() {
-  const faelle = KINDER.filter(brauchtVertretung).length;
+  const heute = heuteISO();
+  const faelle = KINDER.filter(k => offenePeriodeAm(k.id, heute)).length;
   const verf = MITARBEITER.filter(m => statusVon(m) === "verfuegbar").length;
   const krank = MITARBEITER.filter(m => statusVon(m) === "krank").length;
   document.getElementById("header-stats").innerHTML = `
-    <div class="stat"><b>${faelle}</b>offene Fälle</div>
+    <div class="stat"><b>${faelle}</b>offene Fälle heute</div>
     <div class="stat"><b>${verf}</b>verfügbar</div>
     <div class="stat"><b>${krank}</b>krank</div>`;
 }
@@ -275,76 +347,97 @@ document.querySelectorAll(".tab").forEach(btn => {
   });
 });
 
-// ---------- UI: Vertretungsfälle ----------
+// ---------- UI: Vertretungsfälle (heute offen) ----------
 function zeichneFaelle() {
   const container = document.getElementById("faelle-liste");
-  const faelle = KINDER.filter(brauchtVertretung);
+  const heute = heuteISO();
+  const faelle = KINDER
+    .map(k => ({ k, periode: offenePeriodeAm(k.id, heute) }))
+    .filter(f => f.periode);
+
   if (!faelle.length) {
-    container.innerHTML = `<div class="card"><h3>✅ Keine offenen Fälle</h3>
-      <div class="meta">Aktuell benötigt kein Kind eine Vertretung. Meldet sich ein Mitarbeiter krank (Tab „Mitarbeiter"), entsteht hier automatisch ein Fall für sein Stammkind.</div></div>`;
+    container.innerHTML = `<div class="card"><h3>✅ Keine offenen Fälle heute</h3>
+      <div class="meta">Meldet sich ein Mitarbeiter mit festem Kind krank (Tab „Mitarbeiter"), entsteht hier automatisch ein Fall für den betroffenen Zeitraum – ohne tägliches Nachpflegen.</div></div>`;
     return;
   }
-  container.innerHTML = faelle.map(k => {
+
+  container.innerHTML = faelle.map(({ k, periode }) => {
     const stamm = mitarbeiterMitId(k.stammkraft);
     const keine = k.anforderungen?.keineVertretung;
+    const zeitraumText = periode.bis
+      ? (periode.von === periode.bis ? `nur heute (${datumDE(periode.von)})` : `${datumDE(periode.von)} – ${datumDE(periode.bis)}`)
+      : `ab ${datumDE(periode.von)} (bis auf Weiteres)`;
+    const weitereOffeneTage = offeneTageInPeriode(periode).filter(d => d !== heute);
+
     return `<div class="card fall-alarm">
       <h3>🚨 ${k.name} <span class="meta">· ${k.klasse}</span> ${anforderungsBadges(k)}</h3>
       <div class="meta">🏫 ${k.schule.name}<br>🕐 ${k.betreuungszeit}<br>👤 Stammkraft: ${stamm ? stamm.name : "–"}</div>
-      <div class="grund">${state.gruende[k.id] || "Vertretung benötigt"}</div>
+      <div class="grund">${periode.grund} · Zeitraum: ${zeitraumText}</div>
+      ${weitereOffeneTage.length ? `<div class="meta">📅 Danach auch noch offen: ${weitereOffeneTage.slice(0, 5).map(datumDE).join(", ")}${weitereOffeneTage.length > 5 ? " …" : ""} – kann direkt mit vorgeplant werden.</div>` : ""}
       ${keine ? `<div class="anforderung-warnung">🚫 ${k.anforderungen.hinweis || "Es wird keine fremde Vertretung gewünscht."}</div>` : ""}
       <div class="card-actions">
         ${keine
           ? `<button class="aktion aktion-sekundaer" onclick="oeffneSteckbrief('${k.id}')">📋 Steckbrief</button>
-             <button class="aktion aktion-sekundaer" onclick="fallSchliessen('${k.id}', true)">✅ Eltern informiert / erledigt</button>`
-          : `<button class="aktion aktion-primaer" onclick="sucheVertretung('${k.id}')">🔍 Vertretung suchen</button>
+             <button class="aktion aktion-sekundaer" onclick="heuteOhneVertretung('${k.id}','${periode.id}')">✅ heute geklärt</button>`
+          : `<button class="aktion aktion-primaer" onclick="sucheVertretung('${k.id}','${periode.id}')">🔍 Vertretung suchen</button>
              <button class="aktion aktion-sekundaer" onclick="oeffneSteckbrief('${k.id}')">📋 Steckbrief</button>
-             <button class="aktion aktion-sekundaer" onclick="fallSchliessen('${k.id}', false)">✅ erledigt</button>`}
+             <button class="aktion aktion-sekundaer" onclick="heuteOhneVertretung('${k.id}','${periode.id}')">✅ heute ohne Vertretung geklärt</button>`}
       </div>
     </div>`;
   }).join("");
 }
 
-window.fallSchliessen = function (kindId, ohneVertretung) {
-  const k = kindMitId(kindId);
-  state.vertretungBenoetigt[kindId] = false;
-  state.gruende[kindId] = "";
-  logEintrag("info", ohneVertretung
-    ? `ℹ️ Fall ${k.name} ohne Vertretung geschlossen (keine Vertretung gewünscht / anders gelöst)`
-    : `ℹ️ Fall ${k.name} geschlossen`);
+// Klärt NUR den heutigen Tag (z. B. Kind bleibt zu Hause / Eltern holen ab) –
+// taucht am nächsten Tag automatisch wieder als offen auf, falls die
+// Ausfallperiode weiterläuft. Genau das vom Träger gewünschte Verhalten.
+window.heuteOhneVertretung = function (kindId, periodeId) {
+  const periode = (state.ausfaelle[kindId] || []).find(p => p.id === periodeId);
+  if (!periode) return;
+  const heute = heuteISO();
+  periode.zuweisungen.push({ id: neueId(), mitarbeiterId: null, von: heute, bis: heute });
+  logEintrag("info", `ℹ️ ${kindMitId(kindId).name}: heute (${datumDE(heute)}) ohne Vertretung geklärt`);
   speichereZustand();
   allesNeuZeichnen();
 };
 
-// ---------- UI: Ranking ----------
-window.sucheVertretung = async function (kindId) {
+// ---------- UI: Ranking / Vertretung suchen (mit Zeitraum) ----------
+window.sucheVertretung = async function (kindId, periodeId) {
   const kind = kindMitId(kindId);
-  document.getElementById("faelle-liste").classList.add("hidden");
-  const panel = document.getElementById("ranking-panel");
-  panel.classList.remove("hidden");
-  const inhalt = document.getElementById("ranking-inhalt");
+  const periode = (state.ausfaelle[kindId] || []).find(p => p.id === periodeId);
+  if (!periode) return;
 
+  document.getElementById("faelle-liste").classList.add("hidden");
+  document.getElementById("ranking-panel").classList.remove("hidden");
   map.setView([kind.schule.lat, kind.schule.lng], 12);
 
-  const anfHinweis = anforderungsText(kind)
-    ? `<div class="anforderung-warnung">👥 Anforderung: ${anforderungsText(kind)}</div>` : "";
+  const heute = heuteISO();
+  const vonDefault = periode.von > heute ? periode.von : heute;
+  const bisDefault = periode.bis || vonDefault;
+  const minAttr = ` min="${periode.von}"`;
+  const maxAttr = periode.bis ? ` max="${periode.bis}"` : "";
 
-  const alleVerfuegbaren = MITARBEITER.filter(m => statusVon(m) === "verfuegbar");
+  const kopfHtml = `
+    <div class="ranking-kopf">Vertretung für <b>${kind.name}</b><br>🏫 ${kind.schule.name}<br>🕐 ${kind.betreuungszeit}<br>
+      <small>Ausfallzeitraum: ${datumDE(periode.von)}${periode.bis ? " – " + datumDE(periode.bis) : " (bis auf Weiteres)"}</small></div>
+    <div class="zeitraum-waehler">
+      📅 Vertretung von <input type="date" id="zuw-von" value="${vonDefault}"${minAttr}${maxAttr}>
+      bis <input type="date" id="zuw-bis" value="${bisDefault}"${minAttr}${maxAttr}>
+    </div>`;
+  const anfHinweis = anforderungsText(kind) ? `<div class="anforderung-warnung">👥 Anforderung: ${anforderungsText(kind)}</div>` : "";
+
+  const inhalt = document.getElementById("ranking-inhalt");
+  inhalt.innerHTML = kopfHtml + anfHinweis + `<p class="laden">⏳ Berechne Fahrzeiten…</p>`;
+
+  const alleVerfuegbaren = MITARBEITER.filter(m => statusVon(m, vonDefault) === "verfuegbar");
   const passende = alleVerfuegbaren.filter(m => erfuelltAnforderungen(m, kind));
   const aussortiert = alleVerfuegbaren.length - passende.length;
 
   if (!passende.length) {
-    inhalt.innerHTML = `<div class="ranking-kopf">Vertretung für <b>${kind.name}</b><br>🏫 ${kind.schule.name}</div>
-      ${anfHinweis}
-      <div class="card"><h3>😕 Niemand passt</h3><div class="meta">
-      ${alleVerfuegbaren.length ? `${alleVerfuegbaren.length} Mitarbeiter wären verfügbar, erfüllen aber die Anforderungen nicht.` : "Aktuell ist niemand verfügbar."}
-      Status im Tab „Mitarbeiter" prüfen.</div></div>`;
+    inhalt.innerHTML = kopfHtml + anfHinweis + `<div class="card"><h3>😕 Niemand passt</h3><div class="meta">
+      ${alleVerfuegbaren.length ? `${alleVerfuegbaren.length} Mitarbeiter wären am ${datumDE(vonDefault)} verfügbar, erfüllen aber die Anforderungen nicht.` : `Am ${datumDE(vonDefault)} ist niemand verfügbar.`}
+      Status im Tab „Mitarbeiter" prüfen oder Zeitraum oben anpassen.</div></div>`;
     return;
   }
-
-  inhalt.innerHTML = `
-    <div class="ranking-kopf">Vertretung für <b>${kind.name}</b><br>🏫 ${kind.schule.name}<br>🕐 ${kind.betreuungszeit}</div>
-    ${anfHinweis}
-    <p class="laden">⏳ Berechne Fahrzeiten (${passende.length} passende Mitarbeiter)…</p>`;
 
   // Fahrzeiten ermitteln (OSRM = kostenlos/OpenStreetMap; sonst Offline-Schätzung)
   const autos = passende.filter(m => m.verkehrsmittel === "auto");
@@ -370,11 +463,9 @@ window.sucheVertretung = async function (kindId) {
     return { m, minuten, km: kmAnzeige, echt };
   }).sort((a, b) => a.minuten - b.minuten);
 
-  inhalt.innerHTML = `
-    <div class="ranking-kopf">Vertretung für <b>${kind.name}</b><br>🏫 ${kind.schule.name}<br>🕐 ${kind.betreuungszeit}
-      ${aussortiert ? `<br><small>👥 ${aussortiert} verfügbare(r) Mitarbeiter erfüllt/erfüllen die Anforderungen nicht und werden nicht angezeigt.</small>` : ""}
-      ${osrmFehler ? '<br><small>⚠️ Routendienst offline – Auto-Zeiten sind Offline-Schätzungen (Luftlinie).</small>' : ""}
-    </div>
+  inhalt.innerHTML = kopfHtml + `
+    ${aussortiert ? `<p class="tab-hint">👥 ${aussortiert} verfügbare(r) Mitarbeiter erfüllt/erfüllen die Anforderungen nicht und werden nicht angezeigt.</p>` : ""}
+    ${osrmFehler ? '<p class="tab-hint">⚠️ Routendienst offline – Auto-Zeiten sind Offline-Schätzungen (Luftlinie).</p>' : ""}
     ${anfHinweis}
     ${eintraege.map((e, i) => {
       const dauerText = `${e.minuten} Min.${e.echt ? "" : " (geschätzt)"}`;
@@ -386,24 +477,36 @@ window.sucheVertretung = async function (kindId) {
           🎓 ${e.m.qualifikation}</div>
         <div class="card-actions" onclick="event.stopPropagation()">
           <a class="aktion aktion-whatsapp" target="_blank" rel="noopener"
-             href="${whatsappAnfrageLink(e.m, kind, dauerText)}">💬 anfragen</a>
-          <button class="aktion aktion-primaer" onclick="vertretungZuweisen('${e.m.id}','${kind.id}')">✅ zuweisen</button>
+             href="${whatsappAnfrageLink(e.m, kind, dauerText, vonDefault, bisDefault)}">💬 anfragen</a>
+          <button class="aktion aktion-primaer" onclick="vertretungZuweisen('${e.m.id}','${kind.id}','${periode.id}')">✅ zuweisen</button>
           <a class="aktion aktion-sekundaer" target="_blank" rel="noopener"
              href="${gmapsLink(e.m, kind)}">🗺️ ${e.m.verkehrsmittel === "auto" ? "Route" : "ÖPNV-Verbindung"}</a>
         </div>
       </div>`;
     }).join("")}
-    <p class="tab-hint">Antippen zeigt die Anfahrt auf der Karte. „Zuweisen" schließt den Fall, setzt den Mitarbeiter auf „im Einsatz" und schreibt den Tagesbericht. ÖPNV-Zeiten sind Schätzwerte – der Verbindungs-Link öffnet die echte Fahrplanauskunft.</p>`;
+    <p class="tab-hint">Antippen zeigt die Anfahrt auf der Karte. „Zuweisen" trägt die Vertretung für den oben gewählten Zeitraum ein (auch für die Zukunft vorplanbar) und schreibt den Tagesbericht. Verfügbarkeit wird für den Start-Tag geprüft.</p>`;
 };
 
-window.vertretungZuweisen = function (mId, kId) {
+window.vertretungZuweisen = function (mId, kId, periodeId) {
+  const von = document.getElementById("zuw-von").value;
+  const bis = document.getElementById("zuw-bis").value;
+  if (!von || !bis || bis < von) { alert("Bitte einen gültigen Zeitraum wählen (Ende darf nicht vor dem Start liegen)."); return; }
+
   const m = mitarbeiterMitId(mId);
   const k = kindMitId(kId);
-  if (!confirm(`${m.name} als Vertretung für ${k.name} (${k.schule.name}) eintragen?`)) return;
-  state.mitarbeiterStatus[mId] = "im_einsatz";
-  state.vertretungBenoetigt[kId] = false;
-  state.gruende[kId] = "";
-  logEintrag("vertretung", `✅ ${m.name} übernimmt die Vertretung für ${k.name} (${k.schule.name})`);
+  const zeitraumText = von === bis ? `am ${datumDE(von)}` : `${datumDE(von)} – ${datumDE(bis)}`;
+  if (!confirm(`${m.name} als Vertretung für ${k.name} eintragen (${zeitraumText})?`)) return;
+
+  const periode = (state.ausfaelle[kId] || []).find(p => p.id === periodeId);
+  if (!periode) return;
+  periode.zuweisungen.push({ id: neueId(), mitarbeiterId: mId, von, bis });
+
+  // Vertreter bekommt für den Zeitraum eine eigene "im Einsatz"-Periode,
+  // damit sein Kalender die Zusage widerspiegelt.
+  if (!state.statusPerioden[mId]) state.statusPerioden[mId] = [];
+  state.statusPerioden[mId].push({ id: neueId(), status: "im_einsatz", von, bis, grund: `Vertretung für ${k.name}` });
+
+  logEintrag("vertretung", `✅ ${m.name} übernimmt die Vertretung für ${k.name} (${k.schule.name}) ${zeitraumText}`);
   rankingSchliessen();
   allesNeuZeichnen();
 };
@@ -419,103 +522,193 @@ function rankingSchliessen() {
 }
 document.getElementById("ranking-back").addEventListener("click", rankingSchliessen);
 
-// ---------- UI: Mitarbeiter ----------
-// Reihenfolge nur für die Dropdown-Optionen, NICHT für die Sortierung der Liste
-// (die Liste bleibt alphabetisch stabil, damit Einträge beim Statuswechsel
-// nicht in der Liste herumspringen und dadurch "verschwunden" wirken).
-const statusOptionen = ["im_einsatz", "verfuegbar", "krank"];
+// ---------- UI: Mitarbeiter (Typ + zeitraumbasierter Status) ----------
+const statusOptionen = ["krank", "verfuegbar", "im_einsatz"];
 
 function zeichneMitarbeiter() {
   const container = document.getElementById("mitarbeiter-liste");
+  const heute = heuteISO();
   const sortiert = [...MITARBEITER].sort((a, b) => a.name.localeCompare(b.name));
+
   container.innerHTML = sortiert.map(m => {
     const betreut = kinderVon(m);
-    const aktuell = statusVon(m);
+    const aktuellePeriode = aktuelleStatusPeriode(m, heute);
+    const aktuell = statusVon(m, heute);
+    const statusAnzeige = aktuellePeriode
+      ? `${statusText[aktuell]} ${aktuellePeriode.von === aktuellePeriode.bis ? `(nur ${datumDE(heute)})` : aktuellePeriode.bis ? `bis ${datumDE(aktuellePeriode.bis)}` : "(bis auf Weiteres)"}`
+      : `${statusText[aktuell]} (Grundstatus)`;
+    const kommendePerioden = (state.statusPerioden[m.id] || [])
+      .filter(p => !p.bis || p.bis >= heute)
+      .sort((a, b) => a.von.localeCompare(b.von));
+
     return `<div class="card">
-      <h3>${m.name}
-        <span class="pill pill-modus">${modusText[m.verkehrsmittel]}</span>
-      </h3>
+      <h3>${m.name} <span class="pill pill-modus">${modusText[m.verkehrsmittel]}</span></h3>
       <div class="meta">📍 ${m.wohnort.adresse} · 📞 ${m.telefon}<br>
         🎒 Stammkind(er): ${betreut.length ? betreut.map(k => `${k.name} (${k.schule.name})`).join(", ") : "– (Springer/Pool)"}<br>
         🎓 ${m.qualifikation}</div>
+
       <div class="status-zeile">
-        <label class="status-label" for="status-${m.id}">Status</label>
-        <select id="status-${m.id}" class="status-select status-select-${aktuell}"
-                onchange="statusSetzen('${m.id}', this.value)">
-          ${statusOptionen.map(s => `<option value="${s}" ${s === aktuell ? "selected" : ""}>${statusText[s]}</option>`).join("")}
+        <label class="status-label">Typ</label>
+        <select class="typ-select" onchange="mitarbeitertypSetzen('${m.id}', this.value)">
+          <option value="fest" ${state.mitarbeiterTyp[m.id] === "fest" ? "selected" : ""}>Fest (eigenes Kind)</option>
+          <option value="springer" ${state.mitarbeiterTyp[m.id] === "springer" ? "selected" : ""}>Springer/Pool</option>
         </select>
+      </div>
+
+      <div class="status-anzeige status-anzeige-${aktuell}">Status heute: ${statusAnzeige}</div>
+
+      ${kommendePerioden.length ? `<div class="perioden-liste">
+        ${kommendePerioden.map(p => `<span class="periode-chip periode-chip-${p.status}">
+            ${statusText[p.status]}: ${datumDE(p.von)}${p.bis ? (p.von === p.bis ? "" : " – " + datumDE(p.bis)) : " (bis auf Weiteres)"}
+            <span class="periode-loeschen" onclick="statusPeriodeLoeschen('${m.id}','${p.id}')" title="löschen">✕</span>
+          </span>`).join("")}
+      </div>` : ""}
+
+      <div class="status-form">
+        <select id="neu-status-${m.id}">
+          ${statusOptionen.map(s => `<option value="${s}">${statusText[s]}</option>`).join("")}
+        </select>
+        <input type="date" id="neu-von-${m.id}" value="${heute}" title="von">
+        <input type="date" id="neu-bis-${m.id}" title="bis (leer = bis auf Weiteres)">
+        <button class="aktion aktion-sekundaer" onclick="statusPeriodeHinzufuegen('${m.id}')">+ hinterlegen</button>
       </div>
     </div>`;
   }).join("");
 }
 
-// Statuswechsel: Krankmeldung erzeugt AUTOMATISCH einen Vertretungsfall
-// für die Stammkinder des Mitarbeiters und schreibt das Protokoll.
-// "verfügbar" erzeugt bewusst KEINEN Fall – das betrifft nur die eigene
-// Einsatzbereitschaft für Vertretungen, nicht das eigene Stammkind.
-window.statusSetzen = function (mId, neu) {
-  const m = mitarbeiterMitId(mId);
-  const alt = state.mitarbeiterStatus[mId];
-  if (alt === neu) return;
-  state.mitarbeiterStatus[mId] = neu;
+window.mitarbeitertypSetzen = function (mId, typ) {
+  state.mitarbeiterTyp[mId] = typ;
+  logEintrag("info", `ℹ️ ${mitarbeiterMitId(mId).name}: Typ auf „${typ === "fest" ? "Fest" : "Springer/Pool"}" gesetzt`);
+  speichereZustand();
+  allesNeuZeichnen();
+};
 
-  let neuerFall = false;
-  if (neu === "krank") {
+// Legt einen Status-Zeitraum an (z. B. "krank vom 09.07. bis 12.07.").
+// Erzeugt bei "krank" automatisch eine Ausfallperiode für die Stammkinder
+// über GENAU denselben Zeitraum – kein tägliches Nachpflegen nötig.
+// "verfügbar" erzeugt bewusst KEINEN Fall (betrifft nur die eigene
+// Einsatzbereitschaft, nicht das eigene Stammkind).
+window.statusPeriodeHinzufuegen = function (mId) {
+  const m = mitarbeiterMitId(mId);
+  const status = document.getElementById(`neu-status-${mId}`).value;
+  const von = document.getElementById(`neu-von-${mId}`).value || heuteISO();
+  const bis = document.getElementById(`neu-bis-${mId}`).value || null;
+  if (bis && bis < von) { alert("Das Enddatum darf nicht vor dem Startdatum liegen."); return; }
+
+  if (!state.statusPerioden[mId]) state.statusPerioden[mId] = [];
+  state.statusPerioden[mId].push({ id: neueId(), status, von, bis, grund: "" });
+
+  const heute = heuteISO();
+  const zeitraumText = bis ? (von === bis ? `am ${datumDE(von)}` : `vom ${datumDE(von)} bis ${datumDE(bis)}`) : `ab ${datumDE(von)} (bis auf Weiteres)`;
+  let neuerFallHeute = false;
+
+  if (status === "krank") {
     const betroffene = kinderVon(m);
     betroffene.forEach(k => {
-      if (!brauchtVertretung(k)) {
-        state.vertretungBenoetigt[k.id] = true;
-        state.gruende[k.id] = `Stammkraft ${m.name} krankgemeldet`;
-        neuerFall = true;
-      }
+      if (!state.ausfaelle[k.id]) state.ausfaelle[k.id] = [];
+      state.ausfaelle[k.id].push({ id: neueId(), von, bis, grund: `Stammkraft ${m.name} krankgemeldet`, zuweisungen: [] });
     });
     const zusatz = betroffene.length
-      ? ` → ${betroffene.map(k => k.name).join(", ")} braucht Vertretung` +
+      ? ` → ${betroffene.map(k => k.name).join(", ")} braucht Vertretung ${zeitraumText}` +
         (betroffene.some(k => k.anforderungen?.keineVertretung) ? " (Achtung: keine Vertretung gewünscht!)" : "") +
         (betroffene.some(k => k.anforderungen?.geschlecht) ? " (Anforderung ans Geschlecht beachten!)" : "")
       : " (kein festes Stammkind betroffen)";
-    logEintrag("krankmeldung", `🤒 ${m.name} hat sich krankgemeldet${zusatz}`);
-  } else if (alt === "krank") {
-    logEintrag("info", `💪 ${m.name} wieder gesund (jetzt ${statusText[neu]})`);
-  } else if (alt === "im_einsatz" && neu === "verfuegbar") {
-    logEintrag("info", `ℹ️ Einsatz beendet – ${m.name} jetzt verfügbar für Vertretungen`);
+    logEintrag("krankmeldung", `🤒 ${m.name} krankgemeldet ${zeitraumText}${zusatz}`);
+    neuerFallHeute = betroffene.length > 0 && imZeitraum(heute, von, bis);
+  } else {
+    logEintrag("info", `ℹ️ ${m.name}: Status „${statusText[status]}" hinterlegt (${zeitraumText})`);
   }
 
   speichereZustand();
   allesNeuZeichnen();
-  if (neuerFall) document.querySelector('.tab[data-tab="faelle"]').click();
+  if (neuerFallHeute) document.querySelector('.tab[data-tab="faelle"]').click();
 };
 
-// ---------- UI: Kinder ----------
+window.statusPeriodeLoeschen = function (mId, periodeId) {
+  state.statusPerioden[mId] = (state.statusPerioden[mId] || []).filter(p => p.id !== periodeId);
+  speichereZustand();
+  allesNeuZeichnen();
+};
+
+// ---------- UI: Kinder (Steckbriefe + Ausfallperioden verwalten) ----------
 function zeichneKinder() {
   const container = document.getElementById("kinder-liste");
+  const heute = heuteISO();
+
   container.innerHTML = KINDER.map(k => {
     const stamm = mitarbeiterMitId(k.stammkraft);
-    const offen = brauchtVertretung(k);
-    return `<div class="card ${offen ? "fall-alarm" : ""}">
+    const offenHeute = !!offenePeriodeAm(k.id, heute);
+    const perioden = (state.ausfaelle[k.id] || []).filter(p => !p.bis || p.bis >= heute);
+
+    return `<div class="card ${offenHeute ? "fall-alarm" : ""}">
       <h3>${k.name} <span class="meta">· ${k.alter} J. · ${k.klasse}</span>
-        ${offen ? '<span class="pill pill-krank">Vertretung offen</span>' : ""}
+        ${offenHeute ? '<span class="pill pill-krank">heute offen</span>' : ""}
         ${anforderungsBadges(k)}</h3>
       <div class="meta">🏫 ${k.schule.name}<br>👤 Stammkraft: ${stamm ? `${stamm.name} (${statusText[statusVon(stamm)]})` : "–"}</div>
+      ${perioden.length ? `<div class="ausfall-liste">${perioden.map(p => zeichnePeriodeZeile(k, p)).join("")}</div>` : ""}
       <div class="card-actions">
         <button class="aktion aktion-primaer" onclick="oeffneSteckbrief('${k.id}')">📋 Steckbrief</button>
-        ${offen
-          ? `<button class="aktion aktion-sekundaer" onclick="fallSchliessen('${k.id}', false)">✅ Fall schließen</button>`
-          : `<button class="aktion aktion-rot" onclick="bedarfMelden('${k.id}')">🚨 Vertretung melden</button>`}
+        <button class="aktion aktion-rot" onclick="ausfallMeldenOeffnen('${k.id}')">🚨 Ausfall/Vertretung melden</button>
       </div>
     </div>`;
   }).join("");
 }
 
-window.bedarfMelden = function (kindId) {
-  const k = kindMitId(kindId);
-  const grund = prompt("Grund für den Vertretungsbedarf (z. B. „Stammkraft krankgemeldet“):", "Stammkraft krankgemeldet");
-  if (grund === null) return;
-  state.vertretungBenoetigt[kindId] = true;
-  state.gruende[kindId] = grund || "Vertretung benötigt";
-  logEintrag("krankmeldung", `🚨 Vertretungsbedarf gemeldet für ${k.name}: ${grund || "ohne Angabe"}`);
+function zeichnePeriodeZeile(k, p) {
+  const offeneTage = offeneTageInPeriode(p);
+  const zeitraum = p.bis ? (p.von === p.bis ? datumDE(p.von) : `${datumDE(p.von)} – ${datumDE(p.bis)}`) : `ab ${datumDE(p.von)} (bis auf Weiteres)`;
+  const statusText2 = offeneTage.length
+    ? `🔴 ${offeneTage.length} Tag(e) noch offen (${offeneTage.slice(0, 4).map(datumDE).join(", ")}${offeneTage.length > 4 ? " …" : ""})`
+    : "🟢 vollständig abgedeckt";
+  return `<div class="periode-zeile">
+    <div>📅 ${zeitraum} · ${p.grund}<br><small>${statusText2}</small></div>
+    <div class="periode-zeile-aktionen">
+      ${offeneTage.length ? `<button class="aktion aktion-sekundaer" onclick="sucheVertretung('${k.id}','${p.id}')">🔍 suchen</button>` : ""}
+      <button class="aktion aktion-sekundaer" onclick="periodeBeenden('${k.id}','${p.id}')" title="Zeitraum löschen">🗑</button>
+    </div>
+  </div>`;
+}
+
+window.periodeBeenden = function (kindId, periodeId) {
+  if (!confirm("Diesen Ausfall-/Vertretungszeitraum wirklich löschen?")) return;
+  state.ausfaelle[kindId] = (state.ausfaelle[kindId] || []).filter(p => p.id !== periodeId);
+  speichereZustand();
   allesNeuZeichnen();
-  document.querySelector('.tab[data-tab="faelle"]').click();
+};
+
+// Manuelles Anlegen einer Ausfallperiode (z. B. wenn der Bedarf nicht über
+// eine Mitarbeiter-Krankmeldung entstanden ist, sondern anders gemeldet wurde).
+window.ausfallMeldenOeffnen = function (kindId) {
+  const k = kindMitId(kindId);
+  modal.innerHTML = `
+    <h2>🚨 Ausfall/Vertretung melden</h2>
+    <div class="untertitel">${k.name} · ${k.schule.name}</div>
+    <div class="steckbrief-feld"><label>Von</label><div><input type="date" id="af-von" value="${heuteISO()}"></div></div>
+    <div class="steckbrief-feld"><label>Bis (leer = bis auf Weiteres)</label><div><input type="date" id="af-bis"></div></div>
+    <div class="steckbrief-feld"><label>Grund</label><div>
+      <input type="text" id="af-grund" placeholder="z. B. Stammkraft krankgemeldet" class="text-input"></div></div>
+    <div class="modal-actions">
+      <button class="aktion aktion-primaer" onclick="ausfallMeldenSpeichern('${kindId}')">Speichern</button>
+      <button class="aktion aktion-sekundaer" onclick="schliesseModal()">Abbrechen</button>
+    </div>`;
+  modalOverlay.classList.remove("hidden");
+};
+
+window.ausfallMeldenSpeichern = function (kindId) {
+  const von = document.getElementById("af-von").value || heuteISO();
+  const bis = document.getElementById("af-bis").value || null;
+  const grund = document.getElementById("af-grund").value.trim() || "Vertretung benötigt";
+  if (bis && bis < von) { alert("Das Enddatum darf nicht vor dem Startdatum liegen."); return; }
+
+  if (!state.ausfaelle[kindId]) state.ausfaelle[kindId] = [];
+  state.ausfaelle[kindId].push({ id: neueId(), von, bis, grund, zuweisungen: [] });
+
+  const zeitraumText = bis ? (von === bis ? `am ${datumDE(von)}` : `${datumDE(von)} – ${datumDE(bis)}`) : `ab ${datumDE(von)} (bis auf Weiteres)`;
+  logEintrag("krankmeldung", `🚨 Ausfall gemeldet für ${kindMitId(kindId).name}: ${grund} (${zeitraumText})`);
+  schliesseModal();
+  speichereZustand();
+  allesNeuZeichnen();
+  if (imZeitraum(heuteISO(), von, bis)) document.querySelector('.tab[data-tab="faelle"]').click();
 };
 
 // ---------- UI: Tagesbericht ----------
