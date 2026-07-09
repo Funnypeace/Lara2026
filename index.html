@@ -71,10 +71,18 @@
         <div id="auswertung-ausfallquote"></div>
         <div id="auswertung-heatmap"></div>
         <div class="card">
-          <h3>📥 Export</h3>
-          <div class="meta">Gesamtübersicht aller Mitarbeiter, Kinder und des Protokolls als Excel-Datei (mehrere Tabellenblätter).</div>
+          <h3>📥 Export: Gesamtübersicht</h3>
+          <div class="meta">Alle Mitarbeiter, Kinder, Kind-Abwesenheiten und das komplette Protokoll als Excel-Datei (mehrere Tabellenblätter).</div>
           <div class="card-actions">
             <button class="aktion aktion-primaer" onclick="exportExcelGesamt()">📊 Excel-Übersicht exportieren</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>📅 Export: Monatsübersicht</h3>
+          <div class="meta">Vertretungsstunden, Ausfallquote und Kind-Abwesenheiten für einen einzelnen Monat – z. B. für die monatliche Abrechnung/Prüfung des Stundenkontos.</div>
+          <div class="card-actions">
+            <input type="month" id="monat-auswahl">
+            <button class="aktion aktion-primaer" onclick="exportExcelMonat()">📊 Monatsübersicht exportieren</button>
           </div>
         </div>
       </section>

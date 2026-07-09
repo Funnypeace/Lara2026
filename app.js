@@ -22,7 +22,7 @@
 // =====================================================================
 
 const DEMO_CODE = "lara2026";
-const STORAGE_KEY = "vertretungsplan-demo-v4";
+const STORAGE_KEY = "vertretungsplan-demo-v5";
 
 // ---------- Datumshilfen ----------
 // WICHTIG: "heute" bewusst als LOKALES Kalenderdatum (nicht UTC) – sonst
@@ -66,6 +66,16 @@ function naechsterWerktag(iso) {
   while (istWochenende(d)) d = addTage(d, 1);
   return d;
 }
+// Prüft, ob innerhalb [von, bis] mindestens ein Wochenendtag liegt – für
+// Hinweistexte, damit sichtbar ist, dass Wochenenden bereits automatisch
+// aus der Vertretungspflicht herausfallen (nicht nur "unsichtbar" im Code).
+function enthaeltWochenende(von, bis) {
+  const ende = bis || addTage(von, 6);
+  for (let d = von; d <= ende; d = addTage(d, 1)) {
+    if (istWochenende(d)) return true;
+  }
+  return false;
+}
 function montagDerWoche(iso) {
   const [j, m, t] = iso.split("-").map(Number);
   const jsTag = new Date(Date.UTC(j, m - 1, t)).getUTCDay(); // 0=So … 6=Sa
@@ -82,6 +92,10 @@ function ladeZustand() {
     mitarbeiterTyp: Object.fromEntries(MITARBEITER.map(m => [m.id, m.typ])),
     statusPerioden: Object.fromEntries(MITARBEITER.map(m => [m.id, []])),
     ausfaelle: Object.fromEntries(KINDER.map(k => [k.id, []])),
+    // Separat von "ausfaelle": hier ist das KIND selbst krank/abwesend
+    // (keine Vertretung nötig, aber die Stammkraft wird frei – wichtig für
+    // die Stundenabrechnung, die über die Kinder läuft).
+    kindAbwesenheiten: Object.fromEntries(KINDER.map(k => [k.id, []])),
     protokoll: [...BEISPIEL_PROTOKOLL]
   };
 
@@ -103,6 +117,7 @@ function ladeZustand() {
         mitarbeiterTyp: { ...basis.mitarbeiterTyp, ...gespeichert.mitarbeiterTyp },
         statusPerioden: { ...basis.statusPerioden, ...gespeichert.statusPerioden },
         ausfaelle: { ...basis.ausfaelle, ...gespeichert.ausfaelle },
+        kindAbwesenheiten: { ...basis.kindAbwesenheiten, ...gespeichert.kindAbwesenheiten },
         protokoll: Array.isArray(gespeichert.protokoll) ? gespeichert.protokoll : basis.protokoll
       };
     }
@@ -406,53 +421,21 @@ function tagPasstZuBetreuung(iso, info) {
   return info.moIndizes.has(jsTagZuMoIndex(jsTag));
 }
 
+// Beginn der Zeitrechnung für "seit jeher"-Auswertungen (weit genug in der
+// Vergangenheit, da alle Beispieldaten deutlich später liegen).
+const SEIT_JEHER = "2000-01-01";
+const FERNE_ZUKUNFT = "9999-12-31";
+
 // Vertretungsstunden je Mitarbeiter – zählt nur bereits erfolgte (echte)
 // Zuweisungen bis einschließlich heute, keine nur geplanten Zukunftstage.
 function berechneVertretungsstunden() {
-  const heute = heuteISO();
-  const stunden = {};
-  KINDER.forEach(k => {
-    const info = BETREUUNG_INFO[k.id];
-    (state.ausfaelle[k.id] || []).forEach(periode => {
-      periode.zuweisungen.forEach(z => {
-        if (!z.mitarbeiterId) return;
-        const bisEffektiv = z.bis && z.bis < heute ? z.bis : heute;
-        if (z.von > bisEffektiv) return;
-        for (let d = z.von; d <= bisEffektiv; d = addTage(d, 1)) {
-          if (tagPasstZuBetreuung(d, info)) {
-            stunden[z.mitarbeiterId] = (stunden[z.mitarbeiterId] || 0) + info.stundenProTag;
-          }
-        }
-      });
-    });
-  });
-  return stunden;
+  return berechneVertretungsstundenZeitraum(SEIT_JEHER, FERNE_ZUKUNFT);
 }
 
 // Ausfallquote: Anteil der (bereits vergangenen/heutigen) Betreuungstage mit
 // Ausfallperiode, an denen KEINE echte Vertretung stattfand.
 function berechneAusfallquote() {
-  const heute = heuteISO();
-  const proKind = {};
-  let gesamtTage = 0, gesamtOhne = 0;
-  KINDER.forEach(k => {
-    const info = BETREUUNG_INFO[k.id];
-    let tage = 0, ohne = 0;
-    (state.ausfaelle[k.id] || []).forEach(periode => {
-      const periodeEnde = periode.bis || heute;
-      const bisEffektiv = periodeEnde < heute ? periodeEnde : heute;
-      if (periode.von > bisEffektiv) return;
-      for (let d = periode.von; d <= bisEffektiv; d = addTage(d, 1)) {
-        if (!tagPasstZuBetreuung(d, info)) continue;
-        tage++;
-        const echtAbgedeckt = periode.zuweisungen.some(z => z.mitarbeiterId && imZeitraum(d, z.von, z.bis));
-        if (!echtAbgedeckt) ohne++;
-      }
-    });
-    proKind[k.id] = { tage, ohne };
-    gesamtTage += tage; gesamtOhne += ohne;
-  });
-  return { proKind, gesamt: { tage: gesamtTage, ohne: gesamtOhne } };
+  return berechneAusfallquoteZeitraum(SEIT_JEHER, FERNE_ZUKUNFT);
 }
 
 // Heatmap: Anzahl gleichzeitiger Ausfälle pro Werktag, letzte N Wochen.
@@ -488,6 +471,83 @@ function berechneHeatmap(wochenAnzahl = 8) {
     wochen.push(tage);
   }
   return wochen;
+}
+
+// Wie berechneVertretungsstunden(), aber auf einen Zeitraum begrenzt (z. B.
+// einen Monat) – für die Monatsübersicht im Excel-Export.
+function berechneVertretungsstundenZeitraum(zeitraumVon, zeitraumBis) {
+  const heute = heuteISO();
+  const stunden = {};
+  KINDER.forEach(k => {
+    const info = BETREUUNG_INFO[k.id];
+    (state.ausfaelle[k.id] || []).forEach(periode => {
+      periode.zuweisungen.forEach(z => {
+        if (!z.mitarbeiterId) return;
+        const von = z.von > zeitraumVon ? z.von : zeitraumVon;
+        const bisRoh = z.bis && z.bis < zeitraumBis ? z.bis : zeitraumBis;
+        const bis = bisRoh < heute ? bisRoh : heute;
+        if (von > bis) return;
+        for (let d = von; d <= bis; d = addTage(d, 1)) {
+          if (tagPasstZuBetreuung(d, info)) {
+            stunden[z.mitarbeiterId] = (stunden[z.mitarbeiterId] || 0) + info.stundenProTag;
+          }
+        }
+      });
+    });
+  });
+  return stunden;
+}
+
+// Wie berechneAusfallquote(), aber auf einen Zeitraum begrenzt.
+function berechneAusfallquoteZeitraum(zeitraumVon, zeitraumBis) {
+  const heute = heuteISO();
+  const proKind = {};
+  let gesamtTage = 0, gesamtOhne = 0;
+  KINDER.forEach(k => {
+    const info = BETREUUNG_INFO[k.id];
+    let tage = 0, ohne = 0;
+    (state.ausfaelle[k.id] || []).forEach(periode => {
+      const von = periode.von > zeitraumVon ? periode.von : zeitraumVon;
+      const periodeEnde = periode.bis || heute;
+      const bisRoh = periodeEnde < zeitraumBis ? periodeEnde : zeitraumBis;
+      const bis = bisRoh < heute ? bisRoh : heute;
+      if (von > bis) return;
+      for (let d = von; d <= bis; d = addTage(d, 1)) {
+        if (!tagPasstZuBetreuung(d, info)) continue;
+        tage++;
+        const echtAbgedeckt = periode.zuweisungen.some(z => z.mitarbeiterId && imZeitraum(d, z.von, z.bis));
+        if (!echtAbgedeckt) ohne++;
+      }
+    });
+    proKind[k.id] = { tage, ohne };
+    gesamtTage += tage; gesamtOhne += ohne;
+  });
+  return { proKind, gesamt: { tage: gesamtTage, ohne: gesamtOhne } };
+}
+
+// Kind-Abwesenheiten, die sich mit [zeitraumVon, zeitraumBis] überschneiden –
+// inkl. betroffener Stunden der Stammkraft (für die Stundenkonto-Prüfung).
+function kindAbwesenheitenImZeitraum(zeitraumVon, zeitraumBis) {
+  const ergebnisse = [];
+  KINDER.forEach(k => {
+    const info = BETREUUNG_INFO[k.id];
+    const stamm = mitarbeiterMitId(k.stammkraft);
+    (state.kindAbwesenheiten[k.id] || []).forEach(a => {
+      const aBis = a.bis || a.von;
+      if (aBis < zeitraumVon || a.von > zeitraumBis) return;
+      const ueberlappVon = a.von > zeitraumVon ? a.von : zeitraumVon;
+      const ueberlappBis = aBis < zeitraumBis ? aBis : zeitraumBis;
+      let stunden = 0;
+      for (let d = ueberlappVon; d <= ueberlappBis; d = addTage(d, 1)) {
+        if (tagPasstZuBetreuung(d, info)) stunden += info.stundenProTag;
+      }
+      ergebnisse.push({
+        kindName: k.name, stammName: stamm ? stamm.name : "–",
+        von: a.von, bis: aBis, grund: a.grund, stunden: Number(stunden.toFixed(1))
+      });
+    });
+  });
+  return ergebnisse;
 }
 
 // ---------- UI: Kopfzeile ----------
@@ -539,12 +599,13 @@ function zeichneFaelle() {
     const zeitraumText = periode.bis
       ? (periode.von === periode.bis ? `nur heute (${datumDE(periode.von)})` : `${datumDE(periode.von)} – ${datumDE(periode.bis)}`)
       : `ab ${datumDE(periode.von)} (bis auf Weiteres)`;
+    const weBemerkung = enthaeltWochenende(periode.von, periode.bis) ? " (Wochenende ausgenommen)" : "";
     const weitereOffeneTage = offeneTageInPeriode(periode).filter(d => d !== heute);
 
     return `<div class="card fall-alarm">
       <h3>🚨 ${k.name} <span class="meta">· ${k.klasse}</span> ${anforderungsBadges(k)}</h3>
       <div class="meta">🏫 ${k.schule.name}<br>🕐 ${k.betreuungszeit}<br>👤 Stammkraft: ${stamm ? stamm.name : "–"}</div>
-      <div class="grund">${periode.grund} · Zeitraum: ${zeitraumText}</div>
+      <div class="grund">${periode.grund} · Zeitraum: ${zeitraumText}${weBemerkung}</div>
       ${weitereOffeneTage.length ? `<div class="meta">📅 Danach auch noch offen: ${weitereOffeneTage.slice(0, 5).map(datumDE).join(", ")}${weitereOffeneTage.length > 5 ? " …" : ""} – kann direkt mit vorgeplant werden.</div>` : ""}
       ${keine ? `<div class="anforderung-warnung">🚫 ${k.anforderungen.hinweis || "Es wird keine fremde Vertretung gewünscht."}</div>` : ""}
       <div class="card-actions">
@@ -731,7 +792,7 @@ function zeichneMitarbeiter() {
 
       ${kommendePerioden.length ? `<div class="perioden-liste">
         ${kommendePerioden.map(p => `<span class="periode-chip periode-chip-${p.status}">
-            ${statusText[p.status]}: ${datumDE(p.von)}${p.bis ? (p.von === p.bis ? "" : " – " + datumDE(p.bis)) : " (bis auf Weiteres)"}
+            ${statusText[p.status]}: ${datumDE(p.von)}${p.bis ? (p.von === p.bis ? "" : " – " + datumDE(p.bis)) : " (bis auf Weiteres)"}${p.status === "krank" && enthaeltWochenende(p.von, p.bis) ? " · Wochenende ausgenommen" : ""}
             <span class="periode-loeschen" onclick="statusPeriodeLoeschen('${m.id}','${p.id}')" title="löschen">✕</span>
           </span>`).join("")}
       </div>` : ""}
@@ -811,6 +872,7 @@ function zeichneKinder() {
     const stamm = mitarbeiterMitId(k.stammkraft);
     const offenHeute = !!offenePeriodeAm(k.id, heute);
     const perioden = (state.ausfaelle[k.id] || []).filter(p => !p.bis || p.bis >= heute);
+    const abwesenheiten = (state.kindAbwesenheiten[k.id] || []).filter(a => !a.bis || a.bis >= heute);
 
     return `<div class="card ${offenHeute ? "fall-alarm" : ""}">
       <h3>${k.name} <span class="meta">· ${k.alter} J. · ${k.klasse}</span>
@@ -818,9 +880,11 @@ function zeichneKinder() {
         ${anforderungsBadges(k)}</h3>
       <div class="meta">🏫 ${k.schule.name}<br>👤 Stammkraft: ${stamm ? `${stamm.name} (${statusText[statusVon(stamm)]})` : "–"}</div>
       ${perioden.length ? `<div class="ausfall-liste">${perioden.map(p => zeichnePeriodeZeile(k, p)).join("")}</div>` : ""}
+      ${abwesenheiten.length ? `<div class="ausfall-liste">${abwesenheiten.map(a => zeichneAbwesenheitZeile(k, a)).join("")}</div>` : ""}
       <div class="card-actions">
         <button class="aktion aktion-primaer" onclick="oeffneSteckbrief('${k.id}')">📋 Steckbrief</button>
         <button class="aktion aktion-rot" onclick="ausfallMeldenOeffnen('${k.id}')">🚨 Ausfall/Vertretung melden</button>
+        <button class="aktion aktion-sekundaer" onclick="kindAbwesendMeldenOeffnen('${k.id}')">🏥 Kind krank/abwesend</button>
       </div>
     </div>`;
   }).join("");
@@ -829,14 +893,25 @@ function zeichneKinder() {
 function zeichnePeriodeZeile(k, p) {
   const offeneTage = offeneTageInPeriode(p);
   const zeitraum = p.bis ? (p.von === p.bis ? datumDE(p.von) : `${datumDE(p.von)} – ${datumDE(p.bis)}`) : `ab ${datumDE(p.von)} (bis auf Weiteres)`;
+  const weBemerkung = enthaeltWochenende(p.von, p.bis) ? " · Wochenende ausgenommen" : "";
   const statusText2 = offeneTage.length
     ? `🔴 ${offeneTage.length} Tag(e) noch offen (${offeneTage.slice(0, 4).map(datumDE).join(", ")}${offeneTage.length > 4 ? " …" : ""})`
     : "🟢 vollständig abgedeckt";
   return `<div class="periode-zeile">
-    <div>📅 ${zeitraum} · ${p.grund}<br><small>${statusText2}</small></div>
+    <div>📅 ${zeitraum}${weBemerkung} · ${p.grund}<br><small>${statusText2}</small></div>
     <div class="periode-zeile-aktionen">
       ${offeneTage.length ? `<button class="aktion aktion-sekundaer" onclick="sucheVertretung('${k.id}','${p.id}')">🔍 suchen</button>` : ""}
       <button class="aktion aktion-sekundaer" onclick="periodeBeenden('${k.id}','${p.id}')" title="Zeitraum löschen">🗑</button>
+    </div>
+  </div>`;
+}
+
+function zeichneAbwesenheitZeile(k, a) {
+  const zeitraum = a.von === a.bis ? datumDE(a.von) : `${datumDE(a.von)} – ${datumDE(a.bis)}`;
+  return `<div class="periode-zeile">
+    <div>🏥 ${zeitraum} · ${a.grund}<br><small>Kind abwesend – keine Betreuungsstunden, Stammkraft verfügbar</small></div>
+    <div class="periode-zeile-aktionen">
+      <button class="aktion aktion-sekundaer" onclick="kindAbwesenheitLoeschen('${k.id}','${a.id}')" title="löschen">🗑</button>
     </div>
   </div>`;
 }
@@ -883,6 +958,63 @@ window.ausfallMeldenSpeichern = function (kindId) {
   if (imZeitraum(heuteISO(), von, bis)) document.querySelector('.tab[data-tab="faelle"]').click();
 };
 
+// "Kind krank/abwesend" ist bewusst GETRENNT von "Ausfall/Vertretung melden":
+// Ist das Kind selbst nicht da, wird KEINE Vertretung benötigt – die
+// Stammkraft wird stattdessen für den Zeitraum als "verfügbar" markiert.
+// Wichtig für die Abrechnung: Die Stunden laufen über die Kinder, ein
+// abwesenes Kind bedeutet für die Stammkraft keine abrechenbaren Stunden
+// an diesem Kind – deshalb wird das explizit im Protokoll/Bericht vermerkt.
+window.kindAbwesendMeldenOeffnen = function (kindId) {
+  const k = kindMitId(kindId);
+  const stamm = mitarbeiterMitId(k.stammkraft);
+  modal.innerHTML = `
+    <h2>🏥 Kind krank/abwesend melden</h2>
+    <div class="untertitel">${k.name} · ${k.schule.name}</div>
+    <div class="steckbrief-feld"><label>Von</label><div><input type="date" id="ka-von" value="${heuteISO()}"></div></div>
+    <div class="steckbrief-feld"><label>Bis (leer = nur dieser eine Tag)</label><div><input type="date" id="ka-bis"></div></div>
+    <div class="steckbrief-feld"><label>Grund</label><div>
+      <input type="text" id="ka-grund" placeholder="z. B. Kind erkrankt" class="text-input"></div></div>
+    <div class="steckbrief-wichtig">ℹ️ Es wird KEINE Vertretung gesucht. ${stamm ? `Die Stammkraft ${stamm.name} wird` : "Die Stammkraft wird"} für diesen Zeitraum als „verfügbar" markiert. Wird im Bericht/Export vermerkt, damit das Stundenkonto korrekt geprüft werden kann (keine Betreuungsstunden für dieses Kind).</div>
+    <div class="modal-actions">
+      <button class="aktion aktion-primaer" onclick="kindAbwesendSpeichern('${kindId}')">Speichern</button>
+      <button class="aktion aktion-sekundaer" onclick="schliesseModal()">Abbrechen</button>
+    </div>`;
+  modalOverlay.classList.remove("hidden");
+};
+
+window.kindAbwesendSpeichern = function (kindId) {
+  const von = document.getElementById("ka-von").value || heuteISO();
+  const bis = document.getElementById("ka-bis").value || von;
+  const grund = document.getElementById("ka-grund").value.trim() || "Kind krank/abwesend";
+  if (bis < von) { alert("Das Enddatum darf nicht vor dem Startdatum liegen."); return; }
+
+  if (!state.kindAbwesenheiten[kindId]) state.kindAbwesenheiten[kindId] = [];
+  state.kindAbwesenheiten[kindId].push({ id: neueId(), von, bis, grund });
+
+  const k = kindMitId(kindId);
+  const stamm = mitarbeiterMitId(k.stammkraft);
+  let hinweisStamm = "";
+  if (stamm) {
+    if (!state.statusPerioden[stamm.id]) state.statusPerioden[stamm.id] = [];
+    state.statusPerioden[stamm.id].push({ id: neueId(), status: "verfuegbar", von, bis, grund: `Kind ${k.name} krank/abwesend` });
+    hinweisStamm = ` – Stammkraft ${stamm.name} in diesem Zeitraum als verfügbar markiert`;
+  }
+
+  const zeitraumText = von === bis ? `am ${datumDE(von)}` : `${datumDE(von)} – ${datumDE(bis)}`;
+  logEintrag("kind_abwesend", `🏥 ${k.name} krank/abwesend ${zeitraumText}: ${grund}${hinweisStamm} (keine Betreuungsstunden für dieses Kind – wichtig fürs Stundenkonto)`);
+
+  schliesseModal();
+  speichereZustand();
+  allesNeuZeichnen();
+};
+
+window.kindAbwesenheitLoeschen = function (kindId, id) {
+  if (!confirm("Diese Kind-Abwesenheit wirklich löschen?")) return;
+  state.kindAbwesenheiten[kindId] = (state.kindAbwesenheiten[kindId] || []).filter(a => a.id !== id);
+  speichereZustand();
+  allesNeuZeichnen();
+};
+
 // ---------- UI: Tagesbericht ----------
 function berichtText(datum, eintraege) {
   return [
@@ -907,9 +1039,10 @@ function zeichneBericht() {
     const eintraege = [...nachDatum[datum]].sort((a, b) => a.zeit.localeCompare(b.zeit));
     const krank = eintraege.filter(e => e.typ === "krankmeldung").length;
     const vertreten = eintraege.filter(e => e.typ === "vertretung").length;
+    const kindAbwesend = eintraege.filter(e => e.typ === "kind_abwesend").length;
     return `<div class="card">
       <h3>📅 ${datumDE(datum)} ${datum === heuteISO() ? '<span class="pill pill-modus">heute</span>' : ""}</h3>
-      <div class="meta">🤒 ${krank} Krankmeldung(en) · ✅ ${vertreten} Vertretung(en) zugewiesen</div>
+      <div class="meta">🤒 ${krank} Krankmeldung(en) · ✅ ${vertreten} Vertretung(en) zugewiesen${kindAbwesend ? ` · 🏥 ${kindAbwesend} Kind-Abwesenheit(en)` : ""}</div>
       <ul class="bericht-eintraege">
         ${eintraege.map(e => `<li><span class="bericht-zeit">${e.zeit}</span> ${e.text}</li>`).join("")}
       </ul>
@@ -1083,6 +1216,12 @@ window.exportExcelGesamt = function () {
     ["Gesamt", "", "", gesamt.tage, gesamt.ohne, gesamt.tage ? `${Math.round(gesamt.ohne / gesamt.tage * 100)}%` : "0%", ""]
   ];
 
+  const abwesenheiten = kindAbwesenheitenImZeitraum(SEIT_JEHER, FERNE_ZUKUNFT);
+  const abwesenheitenZeilen = [
+    ["Kind", "Stammkraft", "Von", "Bis", "Grund", "Betroffene Stunden der Stammkraft"],
+    ...abwesenheiten.map(a => [a.kindName, a.stammName, a.von, a.bis, a.grund, a.stunden])
+  ];
+
   const protokollZeilen = [
     ["Datum", "Zeit", "Typ", "Text"],
     ...[...state.protokoll]
@@ -1093,9 +1232,71 @@ window.exportExcelGesamt = function () {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(mitarbeiterZeilen), "Mitarbeiter");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(kinderZeilen), "Kinder");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(abwesenheitenZeilen), "Kind-Abwesenheiten");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(protokollZeilen), "Protokoll");
   XLSX.writeFile(wb, `Vertretungsplan_Uebersicht_${heute}.xlsx`);
   logEintrag("info", "📊 Excel-Gesamtübersicht exportiert");
+};
+
+// Monatsübersicht: dieselben Auswertungen wie oben, aber auf einen
+// gewählten Kalendermonat begrenzt (Stunden, Ausfallquote, Kind-
+// Abwesenheiten, Protokoll) – für die monatliche Abrechnung/Prüfung.
+window.exportExcelMonat = function () {
+  const monatWert = document.getElementById("monat-auswahl").value; // "YYYY-MM"
+  if (!monatWert) { alert("Bitte zuerst einen Monat auswählen."); return; }
+  const [jahr, monat] = monatWert.split("-").map(Number);
+  const monatStart = `${jahr}-${String(monat).padStart(2, "0")}-01`;
+  const letzterTag = new Date(Date.UTC(jahr, monat, 0)).getUTCDate();
+  const monatEnde = `${jahr}-${String(monat).padStart(2, "0")}-${String(letzterTag).padStart(2, "0")}`;
+
+  const stunden = berechneVertretungsstundenZeitraum(monatStart, monatEnde);
+  const { proKind, gesamt } = berechneAusfallquoteZeitraum(monatStart, monatEnde);
+  const abwesenheiten = kindAbwesenheitenImZeitraum(monatStart, monatEnde);
+
+  const mitarbeiterZeilen = [
+    ["Name", "Typ", "Vertretungsstunden im Monat"],
+    ...MITARBEITER.map(m => [
+      m.name,
+      state.mitarbeiterTyp[m.id] === "fest" ? "Fest" : "Springer/Pool",
+      Number((stunden[m.id] || 0).toFixed(1))
+    ])
+  ];
+
+  const kinderZeilen = [
+    ["Name", "Schule", "Stammkraft", "Ausfalltage im Monat", "davon ohne Vertretung", "Ausfallquote"],
+    ...KINDER.map(k => {
+      const s = proKind[k.id] || { tage: 0, ohne: 0 };
+      const stamm = mitarbeiterMitId(k.stammkraft);
+      return [
+        k.name, k.schule.name, stamm ? stamm.name : "–",
+        s.tage, s.ohne,
+        s.tage ? `${Math.round(s.ohne / s.tage * 100)}%` : "0%"
+      ];
+    }),
+    [],
+    ["Gesamt", "", "", gesamt.tage, gesamt.ohne, gesamt.tage ? `${Math.round(gesamt.ohne / gesamt.tage * 100)}%` : "0%"]
+  ];
+
+  const abwesenheitenZeilen = [
+    ["Kind", "Stammkraft", "Von", "Bis", "Grund", "Betroffene Stunden der Stammkraft"],
+    ...abwesenheiten.map(a => [a.kindName, a.stammName, a.von, a.bis, a.grund, a.stunden])
+  ];
+
+  const protokollZeilen = [
+    ["Datum", "Zeit", "Typ", "Text"],
+    ...state.protokoll
+      .filter(e => e.datum >= monatStart && e.datum <= monatEnde)
+      .sort((a, b) => (a.datum + a.zeit).localeCompare(b.datum + b.zeit))
+      .map(e => [e.datum, e.zeit, e.typ, e.text])
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(mitarbeiterZeilen), "Mitarbeiter");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(kinderZeilen), "Kinder");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(abwesenheitenZeilen), "Kind-Abwesenheiten");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(protokollZeilen), "Protokoll");
+  XLSX.writeFile(wb, `Vertretungsplan_Monatsuebersicht_${monatWert}.xlsx`);
+  logEintrag("info", `📊 Monatsübersicht ${monatWert} als Excel exportiert`);
 };
 
 // ---------- UI: Steckbrief-Modal ----------
@@ -1141,3 +1342,9 @@ function allesNeuZeichnen() {
   zeichneMarker();
 }
 allesNeuZeichnen();
+
+// Monats-Auswahl (Excel-Monatsübersicht) mit dem aktuellen Monat vorbelegen.
+// Das Element ist statisches HTML (nicht Teil eines re-render-Zyklus),
+// daher genügt eine einmalige Initialisierung beim Start.
+const monatAuswahlEl = document.getElementById("monat-auswahl");
+if (monatAuswahlEl) monatAuswahlEl.value = heuteISO().slice(0, 7);
