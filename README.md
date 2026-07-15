@@ -38,6 +38,14 @@ Alle Daten stehen in [`data.js`](data.js) – Kinder und Mitarbeiter einfach dor
 
 Einfach `index.html` im Browser öffnen – kein Server, keine Installation nötig.
 
+## 🖥️ Windows-Desktop-App
+
+Im Ordner [`desktop-app/`](desktop-app/) liegt eine Electron-Version derselben
+App: eigenes Fenster/Icon wie ein echtes Windows-Programm, und die Daten
+werden in einer lokalen Datei statt im Browser-Speicher abgelegt. Karte/
+Routing laufen weiterhin über das Internet. Bauanleitung siehe
+[`desktop-app/README.md`](desktop-app/README.md).
+
 ## ⚠️ Wichtig vor dem echten Einsatz (DSGVO)
 
 Diese Demo enthält nur fiktive Daten. Für echte Daten gilt:

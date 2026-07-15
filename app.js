@@ -111,7 +111,13 @@ function ladeZustand() {
   basis.ausfaelle.k4 = [{ id: "seed-k4", von: heute, bis: heute, grund: "Stammkraft Marco Lehmann krankgemeldet", zuweisungen: [] }];
 
   try {
-    const gespeichert = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    // In der Windows-Desktop-App (Electron) liegen die Daten in einer
+    // echten lokalen Datei statt im Browser-Speicher – überlebt so auch
+    // das Löschen des Browser-Caches. window.electronAPI existiert nur
+    // dort (per preload.js bereitgestellt); die Online-Version läuft
+    // unverändert über localStorage weiter.
+    const gespeichertRoh = window.electronAPI ? window.electronAPI.ladeDaten() : localStorage.getItem(STORAGE_KEY);
+    const gespeichert = JSON.parse(gespeichertRoh);
     if (gespeichert) {
       return {
         mitarbeiterTyp: { ...basis.mitarbeiterTyp, ...gespeichert.mitarbeiterTyp },
@@ -131,8 +137,13 @@ function speichereZustand() {
   // Statusänderung/Zuweisung mit einem Fehler abbrechen. Im Fehlerfall
   // funktioniert die App weiter, nur bleiben Änderungen nicht über einen
   // Neuladen hinweg gespeichert.
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-  catch (e) { console.warn("Konnte Zustand nicht speichern (localStorage nicht verfügbar):", e); }
+  const json = JSON.stringify(state);
+  try {
+    if (window.electronAPI) window.electronAPI.speichereDaten(json);
+    else localStorage.setItem(STORAGE_KEY, json);
+  } catch (e) {
+    console.warn("Konnte Zustand nicht speichern:", e);
+  }
 }
 
 const kinderVon = m => KINDER.filter(k => k.stammkraft === m.id);
@@ -1376,6 +1387,12 @@ allesNeuZeichnen();
 // Tabs), damit die Suche beim Tippen sofort und ohne Nebenwirkungen filtert.
 document.getElementById("mitarbeiter-suche").addEventListener("input", zeichneMitarbeiter);
 document.getElementById("kinder-suche").addEventListener("input", zeichneKinder);
+
+// In der Windows-Desktop-App: Hinweis + Links zur lokalen Datendatei
+// einblenden (existiert nur dort, die Online-Version zeigt nichts an).
+if (window.electronAPI) {
+  document.getElementById("desktop-datenaktionen")?.classList.remove("hidden");
+}
 
 // Monats-Auswahl (Excel-Monatsübersicht) mit dem aktuellen Monat vorbelegen.
 // Das Element ist statisches HTML (nicht Teil eines re-render-Zyklus),

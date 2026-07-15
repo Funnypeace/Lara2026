@@ -1,0 +1,40 @@
+{
+  "name": "vertretungsplan-schulbegleitung",
+  "version": "1.0.0",
+  "description": "Vertretungsplan Schulbegleitung – Desktop-App (Prototyp), Daten lokal gespeichert, Karte/Routing über das Internet",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build:win": "electron-builder --win portable",
+    "build:win-installer": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "de.lara2026.vertretungsplan",
+    "productName": "Vertretungsplan Schulbegleitung",
+    "asar": false,
+    "files": [
+      "main.js",
+      "preload.js",
+      "icon.png"
+    ],
+    "extraResources": [
+      { "from": "../index.html", "to": "app/index.html" },
+      { "from": "../app.js", "to": "app/app.js" },
+      { "from": "../data.js", "to": "app/data.js" },
+      { "from": "../styles.css", "to": "app/styles.css" },
+      { "from": "../vendor", "to": "app/vendor" }
+    ],
+    "win": {
+      "target": ["portable"],
+      "icon": "icon.png"
+    },
+    "portable": {
+      "artifactName": "VertretungsplanSchulbegleitung.exe"
+    }
+  }
+}

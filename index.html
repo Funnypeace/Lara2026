@@ -100,6 +100,10 @@
 
   <footer>
     ⚠️ Demo mit fiktiven Beispieldaten · Karte © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> · Auto-Routen: OSRM · Für echte Personendaten: Datenschutz (DSGVO, Gesundheitsdaten!) vorher klären.
+    <span id="desktop-datenaktionen" class="hidden">
+      · <a href="#" onclick="window.electronAPI.oeffneDatenordner();return false;">📁 Datenordner öffnen</a>
+      · <a href="#" onclick="window.electronAPI.sichereUnter();return false;">💾 Datensicherung speichern unter …</a>
+    </span>
   </footer>
 
   <script src="vendor/leaflet/leaflet.js"></script>
