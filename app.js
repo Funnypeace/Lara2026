@@ -1339,6 +1339,59 @@ window.exportExcelMonat = function () {
   logEintrag("info", `📊 Monatsübersicht ${monatWert} als Excel exportiert`);
 };
 
+// ---------- Geräte-Übertragung ohne Cloud (Download/Import) ----------
+// Funktioniert überall identisch (Web-Version, Handy-Browser, Desktop-App),
+// da rein clientseitig über Blob-Download bzw. FileReader – keine Cloud-
+// Datenbank nötig. Für manuelles Synchronisieren zwischen zwei Geräten:
+// auf Gerät A herunterladen, Datei z. B. per E-Mail/Cloud-Ordner/USB-Stick
+// zu Gerät B übertragen, dort importieren.
+window.datenHerunterladen = function () {
+  const json = JSON.stringify(state, null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Vertretungsplan_Datensicherung_${heuteISO()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  logEintrag("info", "⬇️ Datensicherung heruntergeladen");
+};
+
+window.datenImportierenDatei = function (input) {
+  const datei = input.files[0];
+  if (!datei) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    input.value = ""; // gleiche Datei später erneut auswählbar machen
+    let importiert;
+    try {
+      importiert = JSON.parse(reader.result);
+    } catch (e) {
+      alert("Die Datei ist keine gültige Vertretungsplan-Datensicherung (.json).");
+      return;
+    }
+    if (!importiert || typeof importiert !== "object") {
+      alert("Die Datei ist keine gültige Vertretungsplan-Datensicherung (.json).");
+      return;
+    }
+    if (!confirm("Aktuellen Datenstand auf DIESEM Gerät durch die importierte Datensicherung ERSETZEN? Das kann nicht rückgängig gemacht werden.")) return;
+
+    state = {
+      mitarbeiterTyp: { ...Object.fromEntries(MITARBEITER.map(m => [m.id, m.typ])), ...importiert.mitarbeiterTyp },
+      statusPerioden: { ...Object.fromEntries(MITARBEITER.map(m => [m.id, []])), ...importiert.statusPerioden },
+      ausfaelle: { ...Object.fromEntries(KINDER.map(k => [k.id, []])), ...importiert.ausfaelle },
+      kindAbwesenheiten: { ...Object.fromEntries(KINDER.map(k => [k.id, []])), ...importiert.kindAbwesenheiten },
+      protokoll: Array.isArray(importiert.protokoll) ? importiert.protokoll : []
+    };
+    speichereZustand();
+    allesNeuZeichnen();
+    alert("Datensicherung erfolgreich importiert.");
+  };
+  reader.readAsText(datei);
+};
+
 // ---------- UI: Steckbrief-Modal ----------
 const modalOverlay = document.getElementById("modal-overlay");
 const modal = document.getElementById("modal");

@@ -87,6 +87,17 @@
             <button class="aktion aktion-primaer" onclick="exportExcelMonat()">📊 Monatsübersicht exportieren</button>
           </div>
         </div>
+        <div class="card">
+          <h3>🔄 Zwischen Geräten übertragen (z. B. PC ↔ Handy)</h3>
+          <div class="meta">Ohne Cloud-Datenbank: Auf diesem Gerät herunterladen, die Datei per E-Mail, Cloud-Ordner (OneDrive/Google Drive) oder USB-Stick zum anderen Gerät übertragen und dort importieren. Funktioniert auf dem Handy im normalen Browser – dafür ist keine extra App nötig. Ersetzt beim Import den kompletten Datenstand auf dem Zielgerät.</div>
+          <div class="card-actions">
+            <button class="aktion aktion-primaer" onclick="datenHerunterladen()">⬇️ Datensicherung herunterladen</button>
+            <label class="aktion aktion-sekundaer datei-button">
+              📤 Datensicherung importieren …
+              <input type="file" accept="application/json,.json" onchange="datenImportierenDatei(this)">
+            </label>
+          </div>
+        </div>
       </section>
     </aside>
 

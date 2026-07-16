@@ -120,9 +120,14 @@ button.aktion {
 .aktion-rot { background: #fdecea; color: var(--rot); }
 .aktion-rot:hover { background: #fad4d0; }
 
-a.aktion {
+a.aktion, label.aktion {
   text-decoration: none; border-radius: 8px; padding: 7px 12px; font-size: .82rem;
   font-weight: 600; display: inline-flex; align-items: center; gap: 5px;
+}
+label.aktion { cursor: pointer; }
+.datei-button input[type="file"] {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
 }
 
 /* ---------- Status-Pills ---------- */
