@@ -60,6 +60,21 @@ Deinstallation über die Systemsteuerung) stattdessen:
 npm run build:win-installer
 ```
 
+### Falls der Build mit „Cannot create symbolic link" abbricht
+
+Bekanntes Windows-Problem: `electron-builder` versucht standardmäßig,
+macOS-Signierwerkzeuge herunterzuladen (die für eine Windows-Version gar
+nicht gebraucht werden) und scheitert beim Entpacken, weil normale
+Windows-Konten keine symbolischen Links erstellen dürfen. Die Build-Skripte
+oben setzen dafür bereits `CSC_IDENTITY_AUTO_DISCOVERY=false` (verhindert
+den unnötigen Download). Tritt der Fehler trotzdem auf (z. B. bei einem
+älteren Cache-Stand), einmalig den Cache löschen und erneut versuchen:
+
+```powershell
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\electron-builder\Cache\winCodeSign" -ErrorAction SilentlyContinue
+npm run build:win
+```
+
 ## Zum Testen ohne Bauen (Entwicklungsmodus)
 
 ```bash

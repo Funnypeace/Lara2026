@@ -2,14 +2,16 @@
   "name": "vertretungsplan-schulbegleitung",
   "version": "1.0.0",
   "description": "Vertretungsplan Schulbegleitung – Desktop-App (Prototyp), Daten lokal gespeichert, Karte/Routing über das Internet",
+  "author": "Lara2026",
   "main": "main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
-    "build:win": "electron-builder --win portable",
-    "build:win-installer": "electron-builder --win nsis"
+    "build:win": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win portable",
+    "build:win-installer": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win nsis"
   },
   "devDependencies": {
+    "cross-env": "^7.0.3",
     "electron": "^31.0.0",
     "electron-builder": "^24.13.3"
   },
