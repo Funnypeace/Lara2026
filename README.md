@@ -46,6 +46,23 @@ werden in einer lokalen Datei statt im Browser-Speicher abgelegt. Karte/
 Routing laufen weiterhin über das Internet. Bauanleitung siehe
 [`desktop-app/README.md`](desktop-app/README.md).
 
+## 📱 Als App aufs Handy installieren (PWA, funktioniert offline)
+
+Die Online-Version lässt sich auch auf dem Smartphone „installieren" –
+ohne App Store: Seite in Chrome (Android) öffnen → Menü → **„App
+installieren"** bzw. **„Zum Startbildschirm hinzufügen"**. Danach startet
+sie wie eine echte App vom Homescreen, mit eigenem Icon und **ohne
+Internetverbindung** (nur Karte/Routing brauchen weiterhin eine
+Verbindung, sobald sie genutzt werden). Technisch über einen Service
+Worker ([`service-worker.js`](service-worker.js)) + [`manifest.json`](manifest.json)
+umgesetzt – bei inhaltlichen Änderungen an den gecachten Dateien die
+`CACHE_VERSION` in `service-worker.js` erhöhen, sonst bleibt ggf. eine
+alte Version im Cache hängen.
+
+Für den manuellen Datenaustausch zwischen PC und Handy (keine Cloud-
+Datenbank) siehe den Bereich „🔄 Zwischen Geräten übertragen" im
+Auswertung-Tab der App.
+
 ## ⚠️ Wichtig vor dem echten Einsatz (DSGVO)
 
 Diese Demo enthält nur fiktive Daten. Für echte Daten gilt:

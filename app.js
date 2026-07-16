@@ -1447,6 +1447,17 @@ if (window.electronAPI) {
   document.getElementById("desktop-datenaktionen")?.classList.remove("hidden");
 }
 
+// Service Worker registrieren (nur Online-Version, nicht in der Desktop-App –
+// die läuft ohnehin schon vollständig lokal aus Dateien). Macht die Seite
+// z. B. auf dem Handy "installierbar" (App-Icon, eigenes Fenster) und danach
+// auch OHNE Internetverbindung startbar – nur Karte/Routing brauchen dann
+// weiterhin eine Verbindung, sobald sie tatsächlich genutzt werden.
+if (!window.electronAPI && "serviceWorker" in navigator && location.protocol.startsWith("http")) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("service-worker.js").catch((e) => console.warn("Service Worker nicht registriert:", e));
+  });
+}
+
 // Monats-Auswahl (Excel-Monatsübersicht) mit dem aktuellen Monat vorbelegen.
 // Das Element ist statisches HTML (nicht Teil eines re-render-Zyklus),
 // daher genügt eine einmalige Initialisierung beim Start.
